@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zodb-s3blobs"
+version = "0.1.0.dev0"
+description = "Store ZODB blobs in S3-compatible object storage"
+license = "ZPL-2.1"
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Zope Public License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+]
+dependencies = [
+    "ZODB>=5.8",
+    "boto3>=1.26",
+    "zope.interface",
+    "zc.lockfile",
+    "ZConfig",
+    "transaction",
+]
+
+[project.urls]
+Homepage = "https://github.com/bluedynamics/zodb-s3blobs"
+Repository = "https://github.com/bluedynamics/zodb-s3blobs"
+Issues = "https://github.com/bluedynamics/zodb-s3blobs/issues"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "moto[s3]>=4.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zodb_s3blobs"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=zodb_s3blobs --cov-report=term-missing --cov-fail-under=90"
+
+[tool.coverage.run]
+source = ["zodb_s3blobs"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]

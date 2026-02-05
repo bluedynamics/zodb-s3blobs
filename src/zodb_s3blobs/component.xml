@@ -1,0 +1,52 @@
+<component prefix="zodb_s3blobs.config">
+
+  <import package="ZODB"/>
+
+  <sectiontype name="s3blobstorage" implements="ZODB.storage"
+      datatype=".S3BlobStorageFactory">
+
+    <key name="bucket-name" required="yes">
+      <description>S3 bucket name.</description>
+    </key>
+
+    <key name="s3-prefix" default="">
+      <description>Key prefix in bucket.</description>
+    </key>
+
+    <key name="s3-endpoint-url" required="no">
+      <description>S3 endpoint URL (for MinIO, Ceph, etc.).</description>
+    </key>
+
+    <key name="s3-region" required="no">
+      <description>AWS region name.</description>
+    </key>
+
+    <key name="s3-access-key" required="no">
+      <description>AWS access key ID. Uses boto3 credential chain if omitted.</description>
+    </key>
+
+    <key name="s3-secret-key" required="no">
+      <description>AWS secret access key. Uses boto3 credential chain if omitted.</description>
+    </key>
+
+    <key name="s3-use-ssl" datatype="boolean" default="true">
+      <description>Whether to use SSL for S3 connections.</description>
+    </key>
+
+    <key name="s3-addressing-style" default="auto">
+      <description>S3 addressing style: path, virtual, or auto.</description>
+    </key>
+
+    <key name="cache-dir" required="yes">
+      <description>Local cache directory path.</description>
+    </key>
+
+    <key name="cache-size" datatype="byte-size" default="1GB">
+      <description>Maximum local cache size.</description>
+    </key>
+
+    <section type="ZODB.storage" name="*" attribute="base"/>
+
+  </sectiontype>
+
+</component>

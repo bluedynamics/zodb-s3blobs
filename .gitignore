@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mxdev/mxmake
+.mxdev_cache/
+.mxmake/
+constraints-mxdev.txt
+requirements-mxdev.txt
+instance/
+
+# OS
+.DS_Store
+Thumbs.db

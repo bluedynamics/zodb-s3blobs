@@ -1,0 +1,144 @@
+# zodb-s3blobs
+
+Store ZODB blobs in S3-compatible object storage.
+
+## Features
+
+- Wraps any ZODB base storage (FileStorage, RelStorage, MappingStorage, ...)
+- Works with any S3-compatible service (AWS S3, MinIO, Ceph, DigitalOcean Spaces)
+- Local LRU filesystem cache for fast reads
+- Full ZODB two-phase commit integration (transactional safety)
+- ZConfig integration for `zope.conf` configuration
+- Supports MVCC storages (`new_instance()`)
+- Garbage collection of orphaned S3 objects during `pack()`
+
+## Installation
+
+```bash
+pip install zodb-s3blobs
+```
+
+## Configuration via zope.conf
+
+Add `%import zodb_s3blobs` and use the `<s3blobstorage>` section wrapping any base storage.
+
+### With FileStorage
+
+```xml
+%import zodb_s3blobs
+
+<zodb_db main>
+    <s3blobstorage>
+        bucket-name my-zodb-blobs
+        s3-endpoint-url http://minio:9000
+        s3-access-key minioadmin
+        s3-secret-key minioadmin
+        cache-dir /var/cache/zodb-s3-blobs
+        cache-size 2GB
+        <filestorage>
+            path /var/lib/zodb/Data.fs
+        </filestorage>
+    </s3blobstorage>
+</zodb_db>
+```
+
+### With RelStorage
+
+When wrapping RelStorage, `zodb-s3blobs` overrides RelStorage's blob handling.
+Blobs go to S3 instead of the `blob_chunk` table. RelStorage still handles object data (pickles) in the RDBMS.
+
+```xml
+%import zodb_s3blobs
+
+<zodb_db main>
+    <s3blobstorage>
+        bucket-name my-zodb-blobs
+        cache-dir /var/cache/zodb-s3-blobs
+        cache-size 2GB
+        <relstorage>
+            <postgresql>
+                dsn dbname='zodb' user='zodb' host='localhost'
+            </postgresql>
+        </relstorage>
+    </s3blobstorage>
+</zodb_db>
+```
+
+## Configuration Reference
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `bucket-name` | *(required)* | S3 bucket name |
+| `s3-prefix` | `""` | Key prefix in bucket |
+| `s3-endpoint-url` | `None` | For MinIO, Ceph, etc. |
+| `s3-region` | `None` | AWS region |
+| `s3-access-key` | `None` | Uses boto3 credential chain if omitted |
+| `s3-secret-key` | `None` | Uses boto3 credential chain if omitted |
+| `s3-use-ssl` | `true` | Whether to use SSL for S3 connections |
+| `s3-addressing-style` | `auto` | S3 addressing style: `path`, `virtual`, or `auto` |
+| `cache-dir` | *(required)* | Local cache directory path |
+| `cache-size` | `1GB` | Maximum local cache size |
+
+## How It Works
+
+`zodb-s3blobs` uses the same proxy/wrapper pattern as ZODB's built-in `BlobStorage`. It wraps any base storage via `__getattr__` and explicitly overrides all blob methods so they always take precedence.
+
+### Two-Phase Commit Flow
+
+1. **`storeBlob`**: Object data (pickle) is stored in the base storage. The blob file is staged locally.
+2. **`tpc_vote`**: Staged blobs are uploaded to S3. If any upload fails, the transaction aborts cleanly.
+3. **`tpc_finish`**: No S3 operations (this method must not fail per ZODB contract). Staged files are moved into the local cache.
+4. **`tpc_abort`**: Uploaded S3 objects are deleted (best-effort). Local staged files are cleaned up.
+
+### S3 Key Layout
+
+```
+blobs/{oid_hex}/{tid_hex}.blob
+```
+
+With a configured prefix: `{prefix}/blobs/{oid_hex}/{tid_hex}.blob`
+
+### Local Cache
+
+The local filesystem cache provides fast reads after the first access. It uses LRU eviction with a background daemon thread that removes the oldest files (by access time) when the total size exceeds the configured maximum. The cache is required -- S3 latency makes direct access impractical for ZODB's synchronous access patterns.
+
+### Garbage Collection
+
+During `pack()`, the base storage is packed first, then S3 is scanned for keys referencing OIDs that are no longer reachable. Orphaned keys are deleted. This also cleans up any objects left behind by failed abort operations.
+
+## Using with MinIO (dev setup)
+
+```yaml
+# docker-compose.yml
+services:
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+```
+
+Create the bucket:
+
+```bash
+mc alias set local http://localhost:9000 minioadmin minioadmin
+mc mb local/zodb-blobs
+```
+
+## Development
+
+```bash
+git clone https://github.com/bluedynamics/zodb-s3blobs.git
+cd zodb-s3blobs
+uv venv
+uv pip install -e ".[test]"
+pytest
+```
+
+## License
+
+ZPL-2.1
