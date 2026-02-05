@@ -11,12 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
       - uses: astral-sh/ruff-action@v3
-      - uses: astral-sh/setup-ty@v1
-        with:
-          version: "0.0.15"
-      - run: ty check src/
+      - uses: astral-sh/setup-uv@v6
+      - name: Install ty
+        run: uv tool install ty
+      - name: Run ty
+        run: ty check src/
 
   test:
     runs-on: ubuntu-latest
@@ -29,6 +29,6 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv pip install --system -e ".[test]"
+        run: uv venv && uv pip install -e ".[test]"
       - name: Run tests
-        run: pytest --cov=zodb_s3blobs --cov-report=term-missing --cov-fail-under=90
+        run: uv run pytest --cov=zodb_s3blobs --cov-report=term-missing --cov-fail-under=90
