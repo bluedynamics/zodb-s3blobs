@@ -13,10 +13,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/ruff-action@v3
       - uses: astral-sh/setup-uv@v6
+      - name: Install dependencies
+        run: uv venv && uv pip install -e "."
       - name: Install ty
-        run: uv tool install ty
+        run: uv pip install ty
       - name: Run ty
-        run: ty check src/
+        run: uv run ty check src/
 
   test:
     runs-on: ubuntu-latest
