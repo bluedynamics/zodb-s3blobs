@@ -1,27 +1,23 @@
 """End-to-end integration tests using ZODB + moto S3."""
 
-import os
-
-import boto3
-import pytest
-import transaction
 from moto import mock_aws
 from ZODB.MappingStorage import MappingStorage
 from ZODB.utils import p64
-
-import ZODB
-
 from zodb_s3blobs.cache import S3BlobCache
 from zodb_s3blobs.s3client import S3Client
 from zodb_s3blobs.storage import S3BlobStorage
+
+import boto3
+import os
+import pytest
+import transaction
+import ZODB
 
 
 @pytest.fixture
 def s3_env():
     with mock_aws():
-        boto3.client("s3", region_name="us-east-1").create_bucket(
-            Bucket="test-bucket"
-        )
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
         yield
 
 
@@ -141,9 +137,7 @@ class TestCacheEviction:
 
         for i in range(10):
             oid = p64(i + 1)
-            blob_path = _write_blob_file(
-                tmp_path, f"evict{i}.bin", b"x" * 200
-            )
+            blob_path = _write_blob_file(tmp_path, f"evict{i}.bin", b"x" * 200)
             txn = transaction.get()
             store.tpc_begin(txn)
             store.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
@@ -155,9 +149,7 @@ class TestCacheEviction:
 
 
 class TestMultipleBlobsTransaction:
-    def test_multiple_blobs_single_transaction(
-        self, storage, s3_client, tmp_path
-    ):
+    def test_multiple_blobs_single_transaction(self, storage, s3_client, tmp_path):
         """Store 3 blobs in one transaction."""
         txn = transaction.get()
         storage.tpc_begin(txn)

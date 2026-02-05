@@ -1,24 +1,21 @@
-import os
-
-import boto3
-import pytest
-import transaction
 from moto import mock_aws
 from ZODB.MappingStorage import MappingStorage
 from ZODB.utils import p64
-
-import ZODB.interfaces
 from zodb_s3blobs.cache import S3BlobCache
 from zodb_s3blobs.s3client import S3Client
 from zodb_s3blobs.storage import S3BlobStorage
+
+import boto3
+import os
+import pytest
+import transaction
+import ZODB.interfaces
 
 
 @pytest.fixture
 def s3_env():
     with mock_aws():
-        boto3.client("s3", region_name="us-east-1").create_bucket(
-            Bucket="test-bucket"
-        )
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
         yield
 
 
@@ -93,7 +90,7 @@ class TestStoreBlob:
         storage.tpc_vote(txn)
         storage.tpc_finish(txn)
 
-        data, tid = base_storage.load(oid)
+        data, _tid = base_storage.load(oid)
         assert data == b"pickle"
 
 

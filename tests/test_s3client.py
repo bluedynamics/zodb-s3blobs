@@ -1,19 +1,15 @@
-import os
+from moto import mock_aws
+from zodb_s3blobs.interfaces import IS3Client
+from zodb_s3blobs.s3client import S3Client
 
 import boto3
 import pytest
-from moto import mock_aws
-
-from zodb_s3blobs.interfaces import IS3Client
-from zodb_s3blobs.s3client import S3Client
 
 
 @pytest.fixture
 def s3_env():
     with mock_aws():
-        boto3.client("s3", region_name="us-east-1").create_bucket(
-            Bucket="test-bucket"
-        )
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
         yield
 
 

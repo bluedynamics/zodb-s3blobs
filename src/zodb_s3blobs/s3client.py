@@ -1,12 +1,12 @@
+from botocore.config import Config
+from botocore.exceptions import ClientError
+from zodb_s3blobs.interfaces import IS3Client
+from zope.interface import implementer
+
+import boto3
 import logging
 import os
 
-import boto3
-from botocore.config import Config
-from botocore.exceptions import ClientError
-from zope.interface import implementer
-
-from zodb_s3blobs.interfaces import IS3Client
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +83,7 @@ class S3Client:
         full_prefix = self._full_key(prefix) if prefix else self._prefix
         paginator = self._client.get_paginator("list_objects_v2")
         prefix_len = len(self._prefix) + 1 if self._prefix else 0
-        for page in paginator.paginate(
-            Bucket=self.bucket_name, Prefix=full_prefix
-        ):
+        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=full_prefix):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 # Strip the prefix so callers see logical keys

@@ -1,13 +1,13 @@
+from ZODB.utils import oid_repr
+from zodb_s3blobs.interfaces import IS3BlobCache
+from zope.interface import implementer
+
+import contextlib
 import logging
 import os
 import shutil
 import threading
 
-from ZODB.utils import oid_repr
-from ZODB.utils import tid_repr
-from zope.interface import implementer
-
-from zodb_s3blobs.interfaces import IS3BlobCache
 
 logger = logging.getLogger(__name__)
 
@@ -100,10 +100,8 @@ class S3BlobCache:
                     # Try to remove empty parent dirs
                     parent = os.path.dirname(fp)
                     if parent != self.cache_dir:
-                        try:
+                        with contextlib.suppress(OSError):
                             os.rmdir(parent)
-                        except OSError:
-                            pass
                 except OSError:
                     pass
         except Exception:
@@ -122,8 +120,6 @@ class S3BlobCache:
         for dirpath, _dirnames, filenames in os.walk(self.cache_dir):
             for fn in filenames:
                 if fn.endswith(".blob"):
-                    try:
+                    with contextlib.suppress(OSError):
                         total += os.path.getsize(os.path.join(dirpath, fn))
-                    except OSError:
-                        pass
         return total

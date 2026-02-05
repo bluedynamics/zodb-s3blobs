@@ -4,7 +4,7 @@ from ZODB.config import BaseConfig
 class S3BlobStorageFactory(BaseConfig):
     """ZConfig factory for S3BlobStorage."""
 
-    def open(self):
+    def open(self, database_name="unnamed", databases=None):
         from zodb_s3blobs.cache import S3BlobCache
         from zodb_s3blobs.s3client import S3Client
         from zodb_s3blobs.storage import S3BlobStorage

@@ -1,13 +1,14 @@
+import contextlib
 import logging
 import os
 import shutil
 import tempfile
-
 import ZODB.blob
 import ZODB.interfaces
 import ZODB.POSException
 import ZODB.utils
 import zope.interface
+
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +68,8 @@ class S3BlobStorage:
         self._s3_client.download_file(key, tmp_download)
         path = self._cache.put(oid, serial, tmp_download)
         # Clean up temp download
-        try:
+        with contextlib.suppress(OSError):
             os.remove(tmp_download)
-        except OSError:
-            pass
         return path
 
     def openCommittedBlobFile(self, oid, serial, blob=None):
@@ -107,10 +106,8 @@ class S3BlobStorage:
                     exc_info=True,
                 )
             # Clean staged file
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(staged_path)
-            except OSError:
-                pass
         self._pending_blobs = {}
         self._uploaded_keys = []
         return tid
@@ -118,7 +115,7 @@ class S3BlobStorage:
     def tpc_abort(self, transaction):
         self.__storage.tpc_abort(transaction)
         # Delete uploaded S3 keys (best-effort)
-        for oid, tid, key in self._uploaded_keys:
+        for _oid, _tid, key in self._uploaded_keys:
             try:
                 self._s3_client.delete_object(key)
             except Exception:
@@ -126,11 +123,9 @@ class S3BlobStorage:
                     "Failed to delete S3 key %s during abort", key, exc_info=True
                 )
         # Clean staged files
-        for oid, staged_path in self._pending_blobs.items():
-            try:
+        for _oid, staged_path in self._pending_blobs.items():
+            with contextlib.suppress(OSError):
                 os.remove(staged_path)
-            except OSError:
-                pass
         self._pending_blobs = {}
         self._uploaded_keys = []
 
@@ -161,9 +156,7 @@ class S3BlobStorage:
                 try:
                     self._s3_client.delete_object(key)
                 except Exception:
-                    logger.warning(
-                        "GC: failed to delete S3 key %s", key, exc_info=True
-                    )
+                    logger.warning("GC: failed to delete S3 key %s", key, exc_info=True)
 
     @staticmethod
     def _oid_from_key(key):

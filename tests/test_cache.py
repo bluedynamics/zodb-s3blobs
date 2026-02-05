@@ -1,13 +1,11 @@
-import os
-import threading
-import time
-
-import pytest
-
 from ZODB.utils import p64
-
 from zodb_s3blobs.cache import S3BlobCache
 from zodb_s3blobs.interfaces import IS3BlobCache
+
+import os
+import pytest
+import threading
+import time
 
 
 def _make_oid(n):
@@ -159,9 +157,7 @@ class TestConcurrency:
         def worker(thread_id):
             try:
                 for i in range(5):
-                    blob = _write_blob(
-                        tmp_path, f"t{thread_id}_{i}.bin", size=50
-                    )
+                    blob = _write_blob(tmp_path, f"t{thread_id}_{i}.bin", size=50)
                     cache.put(
                         _make_oid(thread_id * 100 + i),
                         _make_tid(1),
