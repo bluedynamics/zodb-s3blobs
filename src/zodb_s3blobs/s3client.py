@@ -49,6 +49,10 @@ class S3Client:
         if aws_secret_access_key:
             kwargs["aws_secret_access_key"] = aws_secret_access_key
         kwargs["use_ssl"] = use_ssl
+        if not use_ssl:
+            logger.warning(
+                "S3 SSL is disabled — data and credentials are transmitted in cleartext"
+            )
 
         self._client = boto3.client("s3", **kwargs)
 
