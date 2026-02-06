@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "zodb-s3blobs"
-version = "0.1.0.dev0"
+dynamic = ["version"]
 description = "Store ZODB blobs in S3-compatible object storage"
 license = "ZPL-2.1"
 requires-python = ">=3.12"
@@ -36,18 +36,28 @@ Issues = "https://github.com/bluedynamics/zodb-s3blobs/issues"
 test = [
     "pytest",
     "pytest-cov",
+    "coverage[toml]>=7.0",
     "moto[s3]>=4.0",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/zodb_s3blobs"]
 
+[tool.hatch.version]
+source = "vcs"
+raw-options = { local_scheme = "no-local-version" }
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/zodb_s3blobs/_version.py"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=zodb_s3blobs --cov-report=term-missing --cov-fail-under=90"
+addopts = "--cov --cov-report="
 
 [tool.coverage.run]
+parallel = true
 source = ["zodb_s3blobs"]
+relative_files = true
 
 [tool.coverage.report]
 show_missing = true
@@ -98,5 +108,5 @@ max-doc-length = 120  # W505 triggers above this
 "tests/*" = ["T201"]
 
 [tool.ty.rules]
+unresolved-import = "ignore"
 unsupported-base = "ignore"
-

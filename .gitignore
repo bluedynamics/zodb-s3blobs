@@ -18,9 +18,13 @@ venv/
 *.swp
 *.swo
 
+# Generated version file (hatch-vcs)
+src/zodb_s3blobs/_version.py
+
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 
 # mxdev/mxmake
