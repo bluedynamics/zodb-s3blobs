@@ -33,6 +33,18 @@ htmlcov/
 constraints-mxdev.txt
 requirements-mxdev.txt
 instance/
+instance.yaml
+
+# Secrets / credentials
+.env
+.env.*
+.aws/
+*.pem
+*.key
+credentials.json
+
+# Plans / brainstorming
+plans/
 
 # OS
 .DS_Store
