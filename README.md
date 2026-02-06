@@ -31,8 +31,8 @@ Add `%import zodb_s3blobs` and use the `<s3blobstorage>` section wrapping any ba
     <s3blobstorage>
         bucket-name my-zodb-blobs
         s3-endpoint-url http://minio:9000
-        s3-access-key minioadmin
-        s3-secret-key minioadmin
+        s3-access-key $S3_ACCESS_KEY
+        s3-secret-key $S3_SECRET_KEY
         cache-dir /var/cache/zodb-s3-blobs
         cache-size 2GB
         <filestorage>
@@ -41,6 +41,12 @@ Add `%import zodb_s3blobs` and use the `<s3blobstorage>` section wrapping any ba
     </s3blobstorage>
 </zodb_db>
 ```
+
+ZConfig expands `$VARIABLE` and `${VARIABLE}` from the process environment.
+For production, consider omitting `s3-access-key` and `s3-secret-key` entirely
+and relying on the boto3 credential chain (IAM roles, instance profiles,
+`~/.aws/credentials`, or the `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+environment variables).
 
 ### With RelStorage
 
@@ -72,8 +78,8 @@ Blobs go to S3 instead of the `blob_chunk` table. RelStorage still handles objec
 | `s3-prefix` | `""` | Key prefix in bucket |
 | `s3-endpoint-url` | `None` | For MinIO, Ceph, etc. |
 | `s3-region` | `None` | AWS region |
-| `s3-access-key` | `None` | Uses boto3 credential chain if omitted |
-| `s3-secret-key` | `None` | Uses boto3 credential chain if omitted |
+| `s3-access-key` | `None` | Uses boto3 credential chain if omitted. Use `$ENV_VAR` substitution — never hardcode credentials. |
+| `s3-secret-key` | `None` | Uses boto3 credential chain if omitted. Use `$ENV_VAR` substitution — never hardcode credentials. |
 | `s3-use-ssl` | `true` | Whether to use SSL for S3 connections |
 | `s3-addressing-style` | `auto` | S3 addressing style: `path`, `virtual`, or `auto` |
 | `cache-dir` | *(required)* | Local cache directory path |
