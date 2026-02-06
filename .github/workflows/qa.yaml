@@ -4,6 +4,8 @@ name: QA
 on:
   workflow_call:
 
+permissions: {}
+
 jobs:
   lint:
     name: Ruff

@@ -6,6 +6,8 @@ on:
     branches-ignore: [main]
   pull_request:
 
+permissions: {}
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
