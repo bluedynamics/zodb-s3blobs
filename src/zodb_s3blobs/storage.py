@@ -179,9 +179,9 @@ class S3BlobStorage:
 
 def _oid_hex(oid):
     """Convert oid bytes to hex string."""
-    return ZODB.utils.oid_repr(oid).lstrip("0x") or "0"
+    return ZODB.utils.oid_repr(oid).removeprefix("0x").lstrip("0") or "0"
 
 
 def _tid_hex(tid):
     """Convert tid bytes to hex string."""
-    return ZODB.utils.tid_repr(tid).lstrip("0x") or "0"
+    return ZODB.utils.tid_repr(tid).removeprefix("0x").lstrip("0") or "0"
