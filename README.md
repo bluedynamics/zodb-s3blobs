@@ -137,6 +137,8 @@ Ensure your S3 bucket has appropriate access controls (Block Public Access enabl
 
 ## Using with MinIO (dev setup)
 
+**Warning:** The credentials below are MinIO defaults for local development only. Never use default credentials in production.
+
 ```yaml
 # docker-compose.yml
 services:
