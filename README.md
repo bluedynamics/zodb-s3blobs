@@ -112,6 +112,29 @@ The local filesystem cache provides fast reads after the first access. It uses L
 
 During `pack()`, the base storage is packed first, then S3 is scanned for keys referencing OIDs that are no longer reachable. Orphaned keys are deleted. This also cleans up any objects left behind by failed abort operations.
 
+### S3 Bucket Security
+
+Ensure your S3 bucket has appropriate access controls (Block Public Access enabled, restrictive bucket policy). The minimum IAM policy required by `zodb-s3blobs`:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [{
+        "Effect": "Allow",
+        "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:ListBucket"
+        ],
+        "Resource": [
+            "arn:aws:s3:::BUCKET_NAME",
+            "arn:aws:s3:::BUCKET_NAME/*"
+        ]
+    }]
+}
+```
+
 ## Using with MinIO (dev setup)
 
 ```yaml
