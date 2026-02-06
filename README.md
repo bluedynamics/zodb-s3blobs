@@ -31,8 +31,8 @@ Add `%import zodb_s3blobs` and use the `<s3blobstorage>` section wrapping any ba
     <s3blobstorage>
         bucket-name my-zodb-blobs
         s3-endpoint-url http://minio:9000
-        s3-access-key minioadmin
-        s3-secret-key minioadmin
+        s3-access-key $S3_ACCESS_KEY
+        s3-secret-key $S3_SECRET_KEY
         cache-dir /var/cache/zodb-s3-blobs
         cache-size 2GB
         <filestorage>
@@ -41,6 +41,12 @@ Add `%import zodb_s3blobs` and use the `<s3blobstorage>` section wrapping any ba
     </s3blobstorage>
 </zodb_db>
 ```
+
+ZConfig expands `$VARIABLE` and `${VARIABLE}` from the process environment.
+For production, consider omitting `s3-access-key` and `s3-secret-key` entirely
+and relying on the boto3 credential chain (IAM roles, instance profiles,
+`~/.aws/credentials`, or the `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+environment variables).
 
 ### With RelStorage
 
@@ -72,8 +78,8 @@ Blobs go to S3 instead of the `blob_chunk` table. RelStorage still handles objec
 | `s3-prefix` | `""` | Key prefix in bucket |
 | `s3-endpoint-url` | `None` | For MinIO, Ceph, etc. |
 | `s3-region` | `None` | AWS region |
-| `s3-access-key` | `None` | Uses boto3 credential chain if omitted |
-| `s3-secret-key` | `None` | Uses boto3 credential chain if omitted |
+| `s3-access-key` | `None` | Uses boto3 credential chain if omitted. Use `$ENV_VAR` substitution — never hardcode credentials. |
+| `s3-secret-key` | `None` | Uses boto3 credential chain if omitted. Use `$ENV_VAR` substitution — never hardcode credentials. |
 | `s3-use-ssl` | `true` | Whether to use SSL for S3 connections |
 | `s3-addressing-style` | `auto` | S3 addressing style: `path`, `virtual`, or `auto` |
 | `cache-dir` | *(required)* | Local cache directory path |
@@ -106,7 +112,32 @@ The local filesystem cache provides fast reads after the first access. It uses L
 
 During `pack()`, the base storage is packed first, then S3 is scanned for keys referencing OIDs that are no longer reachable. Orphaned keys are deleted. This also cleans up any objects left behind by failed abort operations.
 
+### S3 Bucket Security
+
+Ensure your S3 bucket has appropriate access controls (Block Public Access enabled, restrictive bucket policy). The minimum IAM policy required by `zodb-s3blobs`:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [{
+        "Effect": "Allow",
+        "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:ListBucket"
+        ],
+        "Resource": [
+            "arn:aws:s3:::BUCKET_NAME",
+            "arn:aws:s3:::BUCKET_NAME/*"
+        ]
+    }]
+}
+```
+
 ## Using with MinIO (dev setup)
+
+**Warning:** The credentials below are MinIO defaults for local development only. Never use default credentials in production.
 
 ```yaml
 # docker-compose.yml

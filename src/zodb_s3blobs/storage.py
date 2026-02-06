@@ -134,7 +134,9 @@ class S3BlobStorage:
     def new_instance(self):
         new_instance = getattr(self.__storage, "new_instance", None)
         base = new_instance() if new_instance is not None else self.__storage
-        return S3BlobStorage(base, self._s3_client, self._cache, self._temp_dir)
+        # Each MVCC instance gets its own temp dir to avoid file name collisions
+        instance_temp = tempfile.mkdtemp(dir=self._temp_dir)
+        return S3BlobStorage(base, self._s3_client, self._cache, instance_temp)
 
     def close(self):
         self.__storage.close()
@@ -179,9 +181,9 @@ class S3BlobStorage:
 
 def _oid_hex(oid):
     """Convert oid bytes to hex string."""
-    return ZODB.utils.oid_repr(oid).lstrip("0x") or "0"
+    return ZODB.utils.oid_repr(oid).removeprefix("0x").lstrip("0") or "0"
 
 
 def _tid_hex(tid):
     """Convert tid bytes to hex string."""
-    return ZODB.utils.tid_repr(tid).lstrip("0x") or "0"
+    return ZODB.utils.tid_repr(tid).removeprefix("0x").lstrip("0") or "0"

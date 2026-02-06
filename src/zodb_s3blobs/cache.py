@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def _hex(data):
     """Convert oid/tid bytes to hex string without 0x prefix."""
-    return oid_repr(data).lstrip("0x") or "0"
+    return oid_repr(data).removeprefix("0x").lstrip("0") or "0"
 
 
 @implementer(IS3BlobCache)

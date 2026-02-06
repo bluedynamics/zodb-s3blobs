@@ -22,11 +22,23 @@
     </key>
 
     <key name="s3-access-key" required="no">
-      <description>AWS access key ID. Uses boto3 credential chain if omitted.</description>
+      <description>
+        AWS access key ID. Uses boto3 credential chain if omitted.
+        Prefer environment variable substitution over plaintext values,
+        e.g. ``s3-access-key $S3_ACCESS_KEY``.
+        For production, consider omitting this key entirely and using
+        IAM roles or the standard boto3 credential chain instead.
+      </description>
     </key>
 
     <key name="s3-secret-key" required="no">
-      <description>AWS secret access key. Uses boto3 credential chain if omitted.</description>
+      <description>
+        AWS secret access key. Uses boto3 credential chain if omitted.
+        Prefer environment variable substitution over plaintext values,
+        e.g. ``s3-secret-key $S3_SECRET_KEY``.
+        For production, consider omitting this key entirely and using
+        IAM roles or the standard boto3 credential chain instead.
+      </description>
     </key>
 
     <key name="s3-use-ssl" datatype="boolean" default="true">

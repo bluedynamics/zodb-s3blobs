@@ -4,8 +4,10 @@ from zodb_s3blobs.interfaces import IS3Client
 from zope.interface import implementer
 
 import boto3
+import contextlib
 import logging
 import os
+import tempfile
 
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,10 @@ class S3Client:
         if aws_secret_access_key:
             kwargs["aws_secret_access_key"] = aws_secret_access_key
         kwargs["use_ssl"] = use_ssl
+        if not use_ssl:
+            logger.warning(
+                "S3 SSL is disabled — data and credentials are transmitted in cleartext"
+            )
 
         self._client = boto3.client("s3", **kwargs)
 
@@ -61,10 +67,17 @@ class S3Client:
 
     def download_file(self, s3_key, local_path):
         full_key = self._full_key(s3_key)
-        tmp_path = local_path + ".tmp"
-        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
-        self._client.download_file(self.bucket_name, full_key, tmp_path)
-        os.rename(tmp_path, local_path)
+        target_dir = os.path.dirname(local_path) or "."
+        os.makedirs(target_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=target_dir, suffix=".blob.tmp")
+        try:
+            os.close(fd)
+            self._client.download_file(self.bucket_name, full_key, tmp_path)
+            os.rename(tmp_path, local_path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+            raise
 
     def delete_object(self, s3_key):
         full_key = self._full_key(s3_key)
