@@ -134,7 +134,9 @@ class S3BlobStorage:
     def new_instance(self):
         new_instance = getattr(self.__storage, "new_instance", None)
         base = new_instance() if new_instance is not None else self.__storage
-        return S3BlobStorage(base, self._s3_client, self._cache, self._temp_dir)
+        # Each MVCC instance gets its own temp dir to avoid file name collisions
+        instance_temp = tempfile.mkdtemp(dir=self._temp_dir)
+        return S3BlobStorage(base, self._s3_client, self._cache, instance_temp)
 
     def close(self):
         self.__storage.close()
