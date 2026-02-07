@@ -41,6 +41,9 @@ test = [
     "moto[s3]>=4.0",
 ]
 
+[tool.hatch.build.targets.sdist]
+exclude = ["sources/", ".claude/"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/zodb_s3blobs"]
 

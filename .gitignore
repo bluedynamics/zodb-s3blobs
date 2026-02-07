@@ -34,6 +34,7 @@ constraints-mxdev.txt
 requirements-mxdev.txt
 instance/
 instance.yaml
+instance*.yaml
 
 # Secrets / credentials
 .env
@@ -42,6 +43,12 @@ instance.yaml
 *.pem
 *.key
 credentials.json
+
+# Development sources (mxdev checkouts)
+sources/
+
+# Claude Code
+.claude/
 
 # Plans / brainstorming
 plans/
