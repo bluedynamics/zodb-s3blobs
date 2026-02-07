@@ -27,8 +27,7 @@ jobs:
       - tests
     runs-on: ubuntu-latest
     permissions:
-      attestations: write
-      id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -37,8 +36,6 @@ jobs:
           persist-credentials: false
 
       - uses: hynek/build-and-inspect-python-package@v2
-        with:
-          attest-build-provenance-github: 'true'
 
   release-test-pypi:
     name: Publish in-dev package to test.pypi.org
