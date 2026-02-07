@@ -49,6 +49,15 @@
       <description>S3 addressing style: path, virtual, or auto.</description>
     </key>
 
+    <key name="s3-sse-customer-key" required="no">
+      <description>
+        Base64-encoded 256-bit (32-byte) key for SSE-C encryption.
+        When set, all S3 uploads are encrypted and reads require this key.
+        Use env var substitution: ``s3-sse-customer-key $S3_SSE_KEY``
+        Requires SSL (s3-use-ssl must be true).
+      </description>
+    </key>
+
     <key name="cache-dir" required="yes">
       <description>Local cache directory path.</description>
     </key>

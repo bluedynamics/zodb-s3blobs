@@ -21,6 +21,7 @@ class S3BlobStorageFactory(BaseConfig):
             aws_secret_access_key=config.s3_secret_key,
             use_ssl=config.s3_use_ssl,
             addressing_style=config.s3_addressing_style,
+            sse_customer_key=config.s3_sse_customer_key,
         )
         cache = S3BlobCache(
             cache_dir=config.cache_dir,
