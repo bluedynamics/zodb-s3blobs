@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "zodb-s3blobs"
 dynamic = ["version"]
 description = "Store ZODB blobs in S3-compatible object storage"
+readme = "README.md"
 license = "ZPL-2.1"
 requires-python = ">=3.12"
 classifiers = [
