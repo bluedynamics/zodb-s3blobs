@@ -4,7 +4,8 @@ name: QA
 on:
   workflow_call:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   lint:

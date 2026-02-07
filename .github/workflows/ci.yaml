@@ -6,7 +6,8 @@ on:
     branches-ignore: [main]
   pull_request:
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}

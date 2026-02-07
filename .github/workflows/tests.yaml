@@ -4,7 +4,8 @@ name: Tests
 on:
   workflow_call:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   test:
