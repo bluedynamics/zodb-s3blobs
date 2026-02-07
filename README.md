@@ -82,6 +82,7 @@ Blobs go to S3 instead of the `blob_chunk` table. RelStorage still handles objec
 | `s3-secret-key` | `None` | Uses boto3 credential chain if omitted. Use `$ENV_VAR` substitution — never hardcode credentials. |
 | `s3-use-ssl` | `true` | Whether to use SSL for S3 connections |
 | `s3-addressing-style` | `auto` | S3 addressing style: `path`, `virtual`, or `auto` |
+| `s3-sse-customer-key` | `None` | Base64-encoded 256-bit key for SSE-C encryption. Requires SSL. |
 | `cache-dir` | *(required)* | Local cache directory path |
 | `cache-size` | `1GB` | Maximum local cache size |
 
@@ -134,6 +135,26 @@ Ensure your S3 bucket has appropriate access controls (Block Public Access enabl
     }]
 }
 ```
+
+### Encryption at Rest (SSE-C)
+
+`zodb-s3blobs` supports SSE-C (Server-Side Encryption with Customer-Provided Keys).
+The S3 service encrypts/decrypts data using your key but never stores it.
+Works with AWS S3, Hetzner Object Storage, MinIO (with KES), and other S3-compatible services.
+
+Generate a 256-bit key:
+
+```bash
+python -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"
+```
+
+Configure via environment variable:
+
+```xml
+s3-sse-customer-key $S3_SSE_KEY
+```
+
+**Important:** If you lose the key, encrypted data is irrecoverable. SSL is required (enforced at startup).
 
 ## Using with MinIO (dev setup)
 

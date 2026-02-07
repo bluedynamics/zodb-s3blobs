@@ -3,6 +3,7 @@ from botocore.exceptions import ClientError
 from zodb_s3blobs.interfaces import IS3Client
 from zope.interface import implementer
 
+import base64
 import boto3
 import contextlib
 import logging
@@ -29,9 +30,26 @@ class S3Client:
         addressing_style="auto",
         connect_timeout=60,
         read_timeout=60,
+        sse_customer_key=None,
     ):
         self.bucket_name = bucket_name
         self._prefix = prefix.rstrip("/") if prefix else ""
+
+        # SSE-C setup
+        if sse_customer_key:
+            if not use_ssl:
+                raise ValueError("SSE-C requires SSL — set s3-use-ssl to true")
+            raw_key = base64.b64decode(sse_customer_key)
+            if len(raw_key) != 32:
+                raise ValueError(
+                    f"SSE-C key must be 32 bytes (256-bit), got {len(raw_key)}"
+                )
+            self._sse_extra_args = {
+                "SSECustomerAlgorithm": "AES256",
+                "SSECustomerKey": raw_key,
+            }
+        else:
+            self._sse_extra_args = {}
 
         config = Config(
             s3={"addressing_style": addressing_style},
@@ -63,7 +81,12 @@ class S3Client:
 
     def upload_file(self, local_path, s3_key):
         full_key = self._full_key(s3_key)
-        self._client.upload_file(local_path, self.bucket_name, full_key)
+        self._client.upload_file(
+            local_path,
+            self.bucket_name,
+            full_key,
+            ExtraArgs=self._sse_extra_args or None,
+        )
 
     def download_file(self, s3_key, local_path):
         full_key = self._full_key(s3_key)
@@ -72,7 +95,12 @@ class S3Client:
         fd, tmp_path = tempfile.mkstemp(dir=target_dir, suffix=".blob.tmp")
         try:
             os.close(fd)
-            self._client.download_file(self.bucket_name, full_key, tmp_path)
+            self._client.download_file(
+                self.bucket_name,
+                full_key,
+                tmp_path,
+                ExtraArgs=self._sse_extra_args or None,
+            )
             os.rename(tmp_path, local_path)
         except BaseException:
             with contextlib.suppress(OSError):
@@ -86,7 +114,9 @@ class S3Client:
     def head_object(self, s3_key):
         full_key = self._full_key(s3_key)
         try:
-            return self._client.head_object(Bucket=self.bucket_name, Key=full_key)
+            return self._client.head_object(
+                Bucket=self.bucket_name, Key=full_key, **self._sse_extra_args
+            )
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 return None

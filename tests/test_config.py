@@ -1,7 +1,9 @@
 from moto import mock_aws
 from zodb_s3blobs.storage import S3BlobStorage
 
+import base64
 import boto3
+import os
 import pytest
 import ZODB.config
 
@@ -77,4 +79,24 @@ class TestZConfig:
         assert storage._cache.max_size == 1024 * 1024 * 1024
         # Default prefix is empty
         assert storage._s3_client._prefix == ""
+        storage.close()
+
+    def test_sse_customer_key(self, s3_env, tmp_path):
+        cache_dir = str(tmp_path / "cache")
+        sse_key = base64.b64encode(os.urandom(32)).decode()
+        storage = ZODB.config.storageFromString(
+            f"""\
+            %import zodb_s3blobs
+            <s3blobstorage>
+                bucket-name test-bucket
+                s3-region us-east-1
+                s3-sse-customer-key {sse_key}
+                cache-dir {cache_dir}
+                <mappingstorage>
+                </mappingstorage>
+            </s3blobstorage>
+            """
+        )
+        assert isinstance(storage, S3BlobStorage)
+        assert storage._s3_client._sse_extra_args["SSECustomerAlgorithm"] == "AES256"
         storage.close()

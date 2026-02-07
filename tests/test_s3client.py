@@ -2,7 +2,9 @@ from moto import mock_aws
 from zodb_s3blobs.interfaces import IS3Client
 from zodb_s3blobs.s3client import S3Client
 
+import base64
 import boto3
+import os
 import pytest
 
 
@@ -160,3 +162,69 @@ class TestPrefix:
         resp = s3.list_objects_v2(Bucket="test-bucket", Prefix="raw/")
         keys = [obj["Key"] for obj in resp.get("Contents", [])]
         assert "raw/key.blob" in keys
+
+
+SSE_KEY = base64.b64encode(os.urandom(32)).decode()
+
+
+class TestSSEC:
+    @pytest.fixture
+    def sse_client(self, s3_env):
+        return S3Client(
+            bucket_name="test-bucket",
+            region_name="us-east-1",
+            sse_customer_key=SSE_KEY,
+        )
+
+    def test_upload_download_roundtrip(self, sse_client, tmp_path):
+        src = tmp_path / "secret.bin"
+        src.write_bytes(b"encrypted blob data")
+        sse_client.upload_file(str(src), "enc/key.blob")
+
+        dst = tmp_path / "decrypted.bin"
+        sse_client.download_file("enc/key.blob", str(dst))
+        assert dst.read_bytes() == b"encrypted blob data"
+
+    def test_head_object(self, sse_client, tmp_path):
+        src = tmp_path / "head_enc.bin"
+        src.write_bytes(b"head test enc")
+        sse_client.upload_file(str(src), "enc/head.blob")
+
+        result = sse_client.head_object("enc/head.blob")
+        assert result is not None
+        assert result["ContentLength"] == 13
+
+    def test_delete_object(self, sse_client, tmp_path):
+        src = tmp_path / "del_enc.bin"
+        src.write_bytes(b"delete me enc")
+        sse_client.upload_file(str(src), "enc/del.blob")
+
+        sse_client.delete_object("enc/del.blob")
+        assert sse_client.head_object("enc/del.blob") is None
+
+    def test_list_objects(self, sse_client, tmp_path):
+        src = tmp_path / "list_enc.bin"
+        src.write_bytes(b"list test")
+        sse_client.upload_file(str(src), "enc/a.blob")
+        sse_client.upload_file(str(src), "enc/b.blob")
+
+        keys = list(sse_client.list_objects("enc/"))
+        assert set(keys) == {"enc/a.blob", "enc/b.blob"}
+
+    def test_ssl_required(self, s3_env):
+        with pytest.raises(ValueError, match="SSE-C requires SSL"):
+            S3Client(
+                bucket_name="test-bucket",
+                region_name="us-east-1",
+                sse_customer_key=SSE_KEY,
+                use_ssl=False,
+            )
+
+    def test_invalid_key_length(self, s3_env):
+        short_key = base64.b64encode(b"too short").decode()
+        with pytest.raises(ValueError, match="32 bytes"):
+            S3Client(
+                bucket_name="test-bucket",
+                region_name="us-east-1",
+                sse_customer_key=short_key,
+            )
