@@ -52,7 +52,12 @@ class S3BlobStorage:
         self._pending_blobs[oid] = staged_path
 
     def loadBlob(self, oid, serial):
-        # Check cache first
+        # Check pending blobs first (stored in current txn, not yet in S3)
+        pending = self._pending_blobs.get(oid)
+        if pending is not None and os.path.exists(pending):
+            return pending
+
+        # Check cache
         cached = self._cache.get(oid, serial)
         if cached is not None:
             return cached

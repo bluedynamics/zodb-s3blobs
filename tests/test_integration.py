@@ -174,6 +174,129 @@ class TestMultipleBlobsTransaction:
                 assert f.read() == f"blob {i}".encode()
 
 
+class TestSavepointBlobs:
+    """Test that blobs work correctly with ZODB savepoints."""
+
+    def test_savepoint_then_commit(self, db):
+        """Basic savepoint + commit with a blob should work."""
+        from ZODB.blob import Blob
+
+        conn = db.open()
+        root = conn.root()
+
+        blob = Blob()
+        with blob.open("w") as f:
+            f.write(b"savepoint blob data")
+        root["blob1"] = blob
+
+        transaction.savepoint()
+        transaction.commit()
+
+        conn2 = db.open()
+        root2 = conn2.root()
+        with root2["blob1"].open("r") as f:
+            assert f.read() == b"savepoint blob data"
+        conn2.close()
+        conn.close()
+
+    def test_multiple_savepoints_with_blobs(self, db):
+        """Multiple savepoints, each adding blobs, then commit."""
+        from ZODB.blob import Blob
+
+        conn = db.open()
+        root = conn.root()
+
+        blob1 = Blob()
+        with blob1.open("w") as f:
+            f.write(b"blob one")
+        root["blob1"] = blob1
+        transaction.savepoint()
+
+        blob2 = Blob()
+        with blob2.open("w") as f:
+            f.write(b"blob two")
+        root["blob2"] = blob2
+        transaction.savepoint()
+
+        blob3 = Blob()
+        with blob3.open("w") as f:
+            f.write(b"blob three")
+        root["blob3"] = blob3
+
+        transaction.commit()
+
+        conn2 = db.open()
+        root2 = conn2.root()
+        with root2["blob1"].open("r") as f:
+            assert f.read() == b"blob one"
+        with root2["blob2"].open("r") as f:
+            assert f.read() == b"blob two"
+        with root2["blob3"].open("r") as f:
+            assert f.read() == b"blob three"
+        conn2.close()
+        conn.close()
+
+    def test_savepoint_blob_accessible_after_commit(self, db):
+        """Blob from savepoint + dirty object in final commit phase."""
+        from persistent.mapping import PersistentMapping
+        from ZODB.blob import Blob
+
+        conn = db.open()
+        root = conn.root()
+
+        blob = Blob()
+        with blob.open("w") as f:
+            f.write(b"important data")
+        root["myblob"] = blob
+        transaction.savepoint()
+
+        root["other"] = PersistentMapping()
+        root["other"]["key"] = "value"
+
+        transaction.commit()
+
+        conn2 = db.open()
+        root2 = conn2.root()
+        with root2["myblob"].open("r") as f:
+            assert f.read() == b"important data"
+        assert root2["other"]["key"] == "value"
+        conn2.close()
+        conn.close()
+
+    def test_savepoint_rollback_then_new_blob_commit(self, db):
+        """Rollback a savepoint, add a new blob, commit."""
+        from ZODB.blob import Blob
+
+        conn = db.open()
+        root = conn.root()
+
+        # Savepoint BEFORE adding blob1
+        sp = transaction.savepoint()
+
+        blob1 = Blob()
+        with blob1.open("w") as f:
+            f.write(b"will be rolled back")
+        root["blob1"] = blob1
+
+        # Rollback removes blob1
+        sp.rollback()
+
+        blob2 = Blob()
+        with blob2.open("w") as f:
+            f.write(b"this one survives")
+        root["blob2"] = blob2
+
+        transaction.commit()
+
+        conn2 = db.open()
+        root2 = conn2.root()
+        assert "blob1" not in root2
+        with root2["blob2"].open("r") as f:
+            assert f.read() == b"this one survives"
+        conn2.close()
+        conn.close()
+
+
 class TestMVCC:
     def test_new_instance_works(self, storage, s3_client, tmp_path):
         """new_instance returns a working storage that shares S3/cache."""

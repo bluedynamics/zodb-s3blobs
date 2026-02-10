@@ -282,6 +282,64 @@ class TestLoadBlob:
             f.close()
 
 
+class TestLoadPendingBlob:
+    """Verify loadBlob returns pending (staged) blobs during a transaction."""
+
+    def test_load_blob_returns_pending_before_vote(self, storage, tmp_path):
+        """After storeBlob but before tpc_vote, loadBlob finds the staged file."""
+        oid = p64(1)
+        blob_content = b"pending blob data"
+        blob_path = _make_blob_file(tmp_path, blob_content)
+
+        txn = transaction.get()
+        storage.tpc_begin(txn)
+        storage.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
+
+        # Before tpc_vote: blob is only in _pending_blobs
+        result = storage.loadBlob(oid, p64(0))
+        assert os.path.exists(result)
+        with open(result, "rb") as f:
+            assert f.read() == blob_content
+
+        storage.tpc_abort(txn)
+
+    def test_load_blob_returns_pending_after_vote(self, storage, tmp_path):
+        """After tpc_vote (blob in S3 AND pending), loadBlob still works."""
+        oid = p64(1)
+        blob_content = b"voted blob data"
+        blob_path = _make_blob_file(tmp_path, blob_content)
+
+        txn = transaction.get()
+        storage.tpc_begin(txn)
+        storage.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
+        storage.tpc_vote(txn)
+
+        result = storage.loadBlob(oid, storage._tid)
+        assert os.path.exists(result)
+        with open(result, "rb") as f:
+            assert f.read() == blob_content
+
+        storage.tpc_finish(txn)
+
+    def test_open_committed_blob_file_with_pending(self, storage, tmp_path):
+        """openCommittedBlobFile works with pending blobs."""
+        oid = p64(1)
+        blob_content = b"open pending blob"
+        blob_path = _make_blob_file(tmp_path, blob_content)
+
+        txn = transaction.get()
+        storage.tpc_begin(txn)
+        storage.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
+
+        f = storage.openCommittedBlobFile(oid, p64(0))
+        try:
+            assert f.read() == blob_content
+        finally:
+            f.close()
+
+        storage.tpc_abort(txn)
+
+
 class TestNewInstance:
     def test_new_instance_shares_s3_and_cache(self, storage, s3_client, blob_cache):
         new = storage.new_instance()
