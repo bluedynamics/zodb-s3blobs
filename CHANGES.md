@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- Fix `loadBlob` to check pending (in-transaction) blobs before S3/cache, preventing `POSKeyError` during savepoint commits.
+
+
 ## 1.0.0
 
 - Initial release.
