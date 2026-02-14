@@ -47,6 +47,9 @@ credentials.json
 # Development sources (mxdev checkouts)
 sources/
 
+# Worktrees
+.worktrees/
+
 # Claude Code
 .claude/
 

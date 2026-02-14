@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2
+
+- Security hardening: restrict temp and cache directory permissions to `0o700`.
+- Fix `_oid_from_key` crash on oversized hex values during `pack()`.
+- Keep S3 object listing lazy in `pack()` GC to avoid memory issues with large buckets.
+- Clean up temp directory on `close()` to prevent disk space leakage.
+
+
 ## 1.0.1
 
 - Fix `loadBlob` to check pending (in-transaction) blobs before S3/cache, preventing `POSKeyError` during savepoint commits.
