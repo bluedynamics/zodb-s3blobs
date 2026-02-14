@@ -8,6 +8,7 @@ from zodb_s3blobs.storage import S3BlobStorage
 import boto3
 import os
 import pytest
+import stat
 import transaction
 import ZODB.interfaces
 
@@ -417,9 +418,41 @@ class TestPack:
         assert len(keys_after) == 0
 
 
+class TestOidFromKey:
+    def test_valid_key(self):
+        oid = S3BlobStorage._oid_from_key("blobs/1/2.blob")
+        assert oid == p64(1)
+
+    def test_short_key_returns_none(self):
+        assert S3BlobStorage._oid_from_key("noslash") is None
+
+    def test_non_hex_returns_none(self):
+        assert S3BlobStorage._oid_from_key("blobs/notahex/1.blob") is None
+
+    def test_overflow_returns_none(self):
+        huge_hex = "f" * 40  # much larger than 8-byte OID can hold
+        assert S3BlobStorage._oid_from_key(f"blobs/{huge_hex}/1.blob") is None
+
+
+class TestDirectoryPermissions:
+    def test_temp_dir_mode(self, storage):
+        mode = stat.S_IMODE(os.stat(storage.temporaryDirectory()).st_mode)
+        assert mode == 0o700
+
+    def test_cache_dir_mode(self, blob_cache):
+        mode = stat.S_IMODE(os.stat(blob_cache.cache_dir).st_mode)
+        assert mode == 0o700
+
+
 class TestClose:
     def test_close(self, storage, base_storage):
         storage.close()
         # MappingStorage.close() sets _is_open to False
         # After closing, operations should fail
         assert not base_storage.opened()
+
+    def test_close_cleans_temp_dir(self, storage):
+        temp_dir = storage.temporaryDirectory()
+        assert os.path.isdir(temp_dir)
+        storage.close()
+        assert not os.path.exists(temp_dir)

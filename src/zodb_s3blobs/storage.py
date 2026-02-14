@@ -29,7 +29,7 @@ class S3BlobStorage:
         self._pending_blobs = {}  # {oid: staged_path}
         self._uploaded_keys = []  # [(oid, tid, s3_key)]
         self._temp_dir = temp_dir or tempfile.mkdtemp()
-        os.makedirs(self._temp_dir, exist_ok=True)
+        os.makedirs(self._temp_dir, exist_ok=True, mode=0o700)
 
     def __getattr__(self, name):
         return getattr(self.__storage, name)
@@ -145,6 +145,8 @@ class S3BlobStorage:
 
     def close(self):
         self.__storage.close()
+        with contextlib.suppress(OSError):
+            shutil.rmtree(self._temp_dir)
 
     # -- Pack / GC --
 
@@ -152,7 +154,7 @@ class S3BlobStorage:
         # Pack the base storage first
         self.__storage.pack(pack_time, referencesf)
         # GC: remove S3 keys for unreachable OIDs
-        for key in list(self._s3_client.list_objects("blobs/")):
+        for key in self._s3_client.list_objects("blobs/"):
             oid = self._oid_from_key(key)
             if oid is None:
                 continue
@@ -175,7 +177,7 @@ class S3BlobStorage:
             oid_hex = parts[-2]
             oid_int = int(oid_hex, 16)
             return ZODB.utils.p64(oid_int)
-        except (ValueError, IndexError):
+        except (ValueError, IndexError, OverflowError):
             return None
 
     # -- Helpers --

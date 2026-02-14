@@ -34,7 +34,7 @@ class S3BlobCache:
         self._bytes_loaded = 0
         self._lock = threading.Lock()
         self._checker_thread = None
-        os.makedirs(cache_dir, exist_ok=True)
+        os.makedirs(cache_dir, exist_ok=True, mode=0o700)
 
     def _blob_path(self, oid, tid):
         oid_hex = _hex(oid)
@@ -63,7 +63,10 @@ class S3BlobCache:
                 self._start_cleanup()
 
     def _start_cleanup(self):
-        """Start background cleanup thread if not already running."""
+        """Start background cleanup thread if not already running.
+
+        Must be called with self._lock held.
+        """
         if self._checker_thread is not None and self._checker_thread.is_alive():
             return
         t = threading.Thread(target=self._cleanup, daemon=True)
