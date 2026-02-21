@@ -8,10 +8,15 @@ import boto3
 import contextlib
 import logging
 import os
+import re
 import tempfile
 
 
 logger = logging.getLogger(__name__)
+
+
+class S3OperationError(Exception):
+    """Wraps boto3 ClientError to avoid leaking AWS infrastructure details."""
 
 
 @implementer(IS3Client)
@@ -34,6 +39,16 @@ class S3Client:
     ):
         self.bucket_name = bucket_name
         self._prefix = prefix.rstrip("/") if prefix else ""
+
+        if self._prefix:
+            if not re.fullmatch(r"[a-zA-Z0-9._/-]*", self._prefix):
+                raise ValueError(
+                    f"s3-prefix contains invalid characters: {self._prefix!r}. "
+                    "Only alphanumeric characters, dots, hyphens, underscores, "
+                    "and slashes are allowed."
+                )
+            if ".." in self._prefix:
+                raise ValueError(f"s3-prefix must not contain '..': {self._prefix!r}")
 
         # SSE-C setup
         if sse_customer_key:
@@ -79,28 +94,42 @@ class S3Client:
             return f"{self._prefix}/{s3_key}"
         return s3_key
 
+    def _wrap_client_error(self, e, operation, s3_key):
+        """Wrap ClientError in a generic error, logging the original at DEBUG."""
+        logger.debug("S3 %s failed for key=%s: %s", operation, s3_key, e)
+        raise S3OperationError(
+            f"S3 {operation} failed for key={s3_key}: "
+            f"{e.response['Error'].get('Code', 'Unknown')}"
+        ) from e
+
     def upload_file(self, local_path, s3_key):
         full_key = self._full_key(s3_key)
-        self._client.upload_file(
-            local_path,
-            self.bucket_name,
-            full_key,
-            ExtraArgs=self._sse_extra_args or None,
-        )
+        try:
+            self._client.upload_file(
+                local_path,
+                self.bucket_name,
+                full_key,
+                ExtraArgs=self._sse_extra_args or None,
+            )
+        except ClientError as e:
+            self._wrap_client_error(e, "upload", s3_key)
 
     def download_file(self, s3_key, local_path):
         full_key = self._full_key(s3_key)
         target_dir = os.path.dirname(local_path) or "."
-        os.makedirs(target_dir, exist_ok=True)
+        os.makedirs(target_dir, exist_ok=True, mode=0o700)
         fd, tmp_path = tempfile.mkstemp(dir=target_dir, suffix=".blob.tmp")
         try:
             os.close(fd)
-            self._client.download_file(
-                self.bucket_name,
-                full_key,
-                tmp_path,
-                ExtraArgs=self._sse_extra_args or None,
-            )
+            try:
+                self._client.download_file(
+                    self.bucket_name,
+                    full_key,
+                    tmp_path,
+                    ExtraArgs=self._sse_extra_args or None,
+                )
+            except ClientError as e:
+                self._wrap_client_error(e, "download", s3_key)
             os.rename(tmp_path, local_path)
         except BaseException:
             with contextlib.suppress(OSError):
@@ -109,7 +138,10 @@ class S3Client:
 
     def delete_object(self, s3_key):
         full_key = self._full_key(s3_key)
-        self._client.delete_object(Bucket=self.bucket_name, Key=full_key)
+        try:
+            self._client.delete_object(Bucket=self.bucket_name, Key=full_key)
+        except ClientError as e:
+            self._wrap_client_error(e, "delete", s3_key)
 
     def head_object(self, s3_key):
         full_key = self._full_key(s3_key)
@@ -120,17 +152,20 @@ class S3Client:
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 return None
-            raise
+            self._wrap_client_error(e, "head", s3_key)
 
     def list_objects(self, prefix=""):
         full_prefix = self._full_key(prefix) if prefix else self._prefix
         paginator = self._client.get_paginator("list_objects_v2")
         prefix_len = len(self._prefix) + 1 if self._prefix else 0
-        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=full_prefix):
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                # Strip the prefix so callers see logical keys
-                if prefix_len:
-                    yield key[prefix_len:]
-                else:
-                    yield key
+        try:
+            for page in paginator.paginate(Bucket=self.bucket_name, Prefix=full_prefix):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    # Strip the prefix so callers see logical keys
+                    if prefix_len:
+                        yield key[prefix_len:]
+                    else:
+                        yield key
+        except ClientError as e:
+            self._wrap_client_error(e, "list", prefix)

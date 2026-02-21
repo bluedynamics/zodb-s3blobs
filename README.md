@@ -142,6 +142,12 @@ Ensure your S3 bucket has appropriate access controls (Block Public Access enabl
 The S3 service encrypts/decrypts data using your key but never stores it.
 Works with AWS S3, Hetzner Object Storage, MinIO (with KES), and other S3-compatible services.
 
+> **Warning — AWS SSE-C deprecation (April 2026):** AWS will disable SSE-C by default
+> on new S3 buckets starting April 2026. Existing buckets are unaffected. For new buckets,
+> you must explicitly enable SSE-C in the bucket policy, or consider migrating to SSE-KMS.
+> If you receive 403 errors with SSE-C configured, this is the likely cause.
+> See the [AWS announcement](https://aws.amazon.com/blogs/storage/advanced-notice-amazon-s3-to-disable-the-use-of-sse-c-encryption-by-default-for-all-new-buckets-and-select-existing-buckets-in-april-2026/) for details.
+
 Generate a 256-bit key:
 
 ```bash
@@ -155,6 +161,8 @@ s3-sse-customer-key $S3_SSE_KEY
 ```
 
 **Important:** If you lose the key, encrypted data is irrecoverable. SSL is required (enforced at startup).
+
+**Security note:** The SSE-C key is held in process memory for the lifetime of the storage instance. In long-running servers, consider using IAM-based encryption (SSE-KMS) instead if memory exposure is a concern. Python's string handling makes secure memory clearing impractical.
 
 ## Using with MinIO (dev setup)
 
@@ -190,6 +198,26 @@ uv venv
 uv pip install -e ".[test]"
 pytest
 ```
+
+For **reproducible deployments** (production), pin dependencies with a lockfile:
+
+```bash
+uv pip compile pyproject.toml -o requirements.txt
+uv pip install -r requirements.txt
+```
+
+## Source Code and Contributions
+
+The source code is managed in a Git repository, with its main branches hosted on GitHub.
+Issues can be reported there too.
+
+We'd be happy to see many forks and pull requests to make this package even better.
+We welcome AI-assisted contributions, but expect every contributor to fully understand and be able to explain the code they submit.
+Please don't send bulk auto-generated pull requests.
+
+Maintainers are Jens Klein and the BlueDynamics Alliance developer team.
+We appreciate any contribution and if a release on PyPI is needed, please just contact one of us.
+We also offer commercial support if any training, coaching, integration or adaptations are needed.
 
 ## License
 

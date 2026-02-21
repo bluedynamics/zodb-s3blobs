@@ -55,6 +55,10 @@
         When set, all S3 uploads are encrypted and reads require this key.
         Use env var substitution: ``s3-sse-customer-key $S3_SSE_KEY``
         Requires SSL (s3-use-ssl must be true).
+
+        NOTE: AWS will disable SSE-C by default on new buckets from April 2026.
+        Existing buckets are unaffected. For new buckets, enable SSE-C in the
+        bucket policy or consider SSE-KMS instead.
       </description>
     </key>
 

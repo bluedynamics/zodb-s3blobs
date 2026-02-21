@@ -22,6 +22,23 @@ jobs:
       - name: Run ruff format check
         run: uvx ruff format --check .
 
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv venv && uv pip install -e "." pip-audit
+
+      - name: Run pip-audit
+        run: uv run pip-audit
+
   typecheck:
     name: ty
     runs-on: ubuntu-latest

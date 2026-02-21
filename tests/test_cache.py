@@ -4,6 +4,7 @@ from zodb_s3blobs.interfaces import IS3BlobCache
 
 import os
 import pytest
+import stat
 import threading
 import time
 
@@ -173,3 +174,43 @@ class TestConcurrency:
             t.join()
 
         assert errors == [], f"Errors in threads: {errors}"
+
+
+class TestSubdirectoryPermissions:
+    def test_put_creates_subdirs_with_restricted_mode(self, cache, tmp_path):
+        blob_path = _write_blob(tmp_path, "perm.bin", size=100)
+        oid = _make_oid(42)
+        tid = _make_tid(1)
+        cache.put(oid, tid, blob_path)
+
+        cached = cache.get(oid, tid)
+        parent_dir = os.path.dirname(cached)
+        mode = stat.S_IMODE(os.stat(parent_dir).st_mode)
+        assert mode == 0o700
+
+
+class TestTOCTOU:
+    def test_get_returns_none_if_file_removed(self, cache, tmp_path):
+        """get() returns None if file was removed between calls."""
+        blob_path = _write_blob(tmp_path, "toctou.bin")
+        oid = _make_oid(1)
+        tid = _make_tid(1)
+        cache.put(oid, tid, blob_path)
+
+        cached = cache.get(oid, tid)
+        assert cached is not None
+        os.remove(cached)
+
+        assert cache.get(oid, tid) is None
+
+
+class TestCacheClose:
+    def test_close_joins_thread(self, cache, tmp_path):
+        """close() should join the cleanup thread."""
+        cache.notify_loaded(cache._check_threshold + 1)
+        cache.close()
+
+    def test_close_idempotent(self, cache):
+        """Calling close() multiple times should not raise."""
+        cache.close()
+        cache.close()

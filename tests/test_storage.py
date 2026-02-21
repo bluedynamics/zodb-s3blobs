@@ -433,6 +433,23 @@ class TestOidFromKey:
         huge_hex = "f" * 40  # much larger than 8-byte OID can hold
         assert S3BlobStorage._oid_from_key(f"blobs/{huge_hex}/1.blob") is None
 
+    def test_rejects_non_blob_extension(self):
+        assert S3BlobStorage._oid_from_key("blobs/1/2.json") is None
+
+    def test_rejects_missing_blobs_prefix(self):
+        assert S3BlobStorage._oid_from_key("other/1/2.blob") is None
+
+    def test_rejects_uppercase_hex(self):
+        assert S3BlobStorage._oid_from_key("blobs/FF/1.blob") is None
+
+    def test_rejects_extra_segments(self):
+        assert S3BlobStorage._oid_from_key("blobs/extra/1/2.blob") is None
+
+    def test_valid_key_with_long_oid(self):
+        oid = S3BlobStorage._oid_from_key("blobs/1a2b3c4d5e6f/abc.blob")
+        assert oid is not None
+        assert oid == p64(0x1A2B3C4D5E6F)
+
 
 class TestDirectoryPermissions:
     def test_temp_dir_mode(self, storage):
@@ -456,3 +473,16 @@ class TestClose:
         assert os.path.isdir(temp_dir)
         storage.close()
         assert not os.path.exists(temp_dir)
+
+    def test_close_calls_cache_close(self, base_storage, s3_client, tmp_path):
+        """close() should call cache.close() if available."""
+        cache = S3BlobCache(str(tmp_path / "cache_close"), max_size=10 * 1024 * 1024)
+        store = S3BlobStorage(
+            base_storage, s3_client, cache, temp_dir=str(tmp_path / "staging_close")
+        )
+        close_called = []
+        original_close = cache.close
+        cache.close = lambda: (close_called.append(True), original_close())
+
+        store.close()
+        assert len(close_called) == 1
