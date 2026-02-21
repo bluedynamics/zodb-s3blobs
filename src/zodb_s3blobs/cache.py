@@ -43,13 +43,15 @@ class S3BlobCache:
 
     def get(self, oid, tid):
         path = self._blob_path(oid, tid)
-        if os.path.exists(path):
+        try:
+            os.utime(path)  # touch atime; also verifies file exists
             return path
-        return None
+        except FileNotFoundError:
+            return None
 
     def put(self, oid, tid, source_path):
         path = self._blob_path(oid, tid)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(path), exist_ok=True, mode=0o700)
         shutil.copy2(source_path, path)
         size = os.path.getsize(path)
         self.notify_loaded(size)
@@ -109,6 +111,13 @@ class S3BlobCache:
                     pass
         except Exception:
             logger.exception("Error during cache cleanup")
+
+    def close(self):
+        """Stop cleanup thread and wait for it to finish."""
+        with self._lock:
+            t = self._checker_thread
+        if t is not None:
+            t.join(timeout=5)
 
     def wait_for_cleanup(self):
         """Wait for any running cleanup thread to finish. For testing."""

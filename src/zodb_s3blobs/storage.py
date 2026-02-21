@@ -1,6 +1,7 @@
 import contextlib
 import logging
 import os
+import re
 import shutil
 import tempfile
 import ZODB.blob
@@ -11,6 +12,8 @@ import zope.interface
 
 
 logger = logging.getLogger(__name__)
+
+_BLOB_KEY_RE = re.compile(r"^blobs/([0-9a-f]+)/[0-9a-f]+\.blob$")
 
 
 @zope.interface.implementer(ZODB.interfaces.IBlobStorage)
@@ -145,6 +148,9 @@ class S3BlobStorage:
 
     def close(self):
         self.__storage.close()
+        close_cache = getattr(self._cache, "close", None)
+        if close_cache is not None:
+            close_cache()
         with contextlib.suppress(OSError):
             shutil.rmtree(self._temp_dir)
 
@@ -170,14 +176,12 @@ class S3BlobStorage:
     @staticmethod
     def _oid_from_key(key):
         """Extract oid bytes from S3 key like 'blobs/{oid_hex}/{tid_hex}.blob'."""
-        parts = key.split("/")
-        if len(parts) < 2:
+        m = _BLOB_KEY_RE.match(key)
+        if m is None:
             return None
         try:
-            oid_hex = parts[-2]
-            oid_int = int(oid_hex, 16)
-            return ZODB.utils.p64(oid_int)
-        except (ValueError, IndexError, OverflowError):
+            return ZODB.utils.p64(int(m.group(1), 16))
+        except (ValueError, OverflowError):
             return None
 
     # -- Helpers --

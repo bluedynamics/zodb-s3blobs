@@ -6,6 +6,7 @@ import base64
 import boto3
 import os
 import pytest
+import stat
 
 
 @pytest.fixture
@@ -228,3 +229,66 @@ class TestSSEC:
                 region_name="us-east-1",
                 sse_customer_key=short_key,
             )
+
+
+class TestPrefixValidation:
+    def test_valid_prefix_accepted(self, s3_env):
+        client = S3Client(
+            bucket_name="test-bucket",
+            prefix="my-prefix_v2/sub",
+            region_name="us-east-1",
+        )
+        assert client._prefix == "my-prefix_v2/sub"
+
+    def test_valid_prefix_with_dots(self, s3_env):
+        client = S3Client(
+            bucket_name="test-bucket", prefix="my.prefix", region_name="us-east-1"
+        )
+        assert client._prefix == "my.prefix"
+
+    def test_empty_prefix_accepted(self, s3_env):
+        client = S3Client(bucket_name="test-bucket", prefix="", region_name="us-east-1")
+        assert client._prefix == ""
+
+    def test_invalid_prefix_with_spaces(self, s3_env):
+        with pytest.raises(ValueError, match="invalid characters"):
+            S3Client(
+                bucket_name="test-bucket", prefix="bad prefix", region_name="us-east-1"
+            )
+
+    def test_prefix_with_null_bytes_rejected(self, s3_env):
+        with pytest.raises(ValueError, match="invalid characters"):
+            S3Client(
+                bucket_name="test-bucket",
+                prefix="bad\x00prefix",
+                region_name="us-east-1",
+            )
+
+    def test_prefix_with_dotdot_rejected(self, s3_env):
+        with pytest.raises(ValueError, match="must not contain"):
+            S3Client(
+                bucket_name="test-bucket",
+                prefix="path/../escape",
+                region_name="us-east-1",
+            )
+
+
+class TestDownloadDirPermissions:
+    def test_download_creates_dir_with_restricted_mode(self, client, tmp_path):
+        src = tmp_path / "source.bin"
+        src.write_bytes(b"perm test")
+        client.upload_file(str(src), "perm/key.blob")
+
+        new_dir = tmp_path / "restricted_dir"
+        dst = new_dir / "downloaded.bin"
+        client.download_file("perm/key.blob", str(dst))
+
+        mode = stat.S_IMODE(os.stat(str(new_dir)).st_mode)
+        assert mode == 0o700
+
+
+class TestS3OperationError:
+    def test_error_type_is_importable(self):
+        from zodb_s3blobs.s3client import S3OperationError
+
+        assert issubclass(S3OperationError, Exception)
