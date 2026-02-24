@@ -31,6 +31,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/bluedynamics/zodb-s3blobs"
 Repository = "https://github.com/bluedynamics/zodb-s3blobs"
+Changelog = "https://github.com/bluedynamics/zodb-s3blobs/blob/main/CHANGES.md"
 Issues = "https://github.com/bluedynamics/zodb-s3blobs/issues"
 
 [project.optional-dependencies]
