@@ -70,7 +70,7 @@ class S3Client:
             s3={"addressing_style": addressing_style},
             connect_timeout=connect_timeout,
             read_timeout=read_timeout,
-            max_pool_connections=25,
+            max_pool_connections=50,
         )
 
         kwargs = {"config": config}
