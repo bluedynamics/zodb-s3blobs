@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.4
+
+- Increase S3 `max_pool_connections` from 10 to 50 to prevent connection pool
+  exhaustion during parallel blob migrations (boto3 multipart uploads use up to
+  10 threads per upload).
+
 ## 1.0.3
 
 Security review fixes (addresses #6):
