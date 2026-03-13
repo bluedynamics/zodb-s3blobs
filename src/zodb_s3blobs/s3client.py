@@ -73,7 +73,7 @@ class S3Client:
             max_pool_connections=50,
         )
 
-        kwargs = {"config": config}
+        kwargs: dict[str, object] = {"config": config}
         if endpoint_url:
             kwargs["endpoint_url"] = endpoint_url
         if region_name:
