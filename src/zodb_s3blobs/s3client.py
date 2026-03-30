@@ -1,3 +1,4 @@
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from zodb_s3blobs.interfaces import IS3Client
@@ -13,6 +14,11 @@ import tempfile
 
 
 logger = logging.getLogger(__name__)
+
+# Default: 500 MB — avoids multipart uploads for typical blob sizes.
+# S3-compatible providers (e.g. Hetzner) often reject UploadPart requests.
+# AWS users who want multipart can lower this via multipart_threshold.
+_DEFAULT_MULTIPART_THRESHOLD = 500 * 1024 * 1024
 
 
 class S3OperationError(Exception):
@@ -36,9 +42,15 @@ class S3Client:
         connect_timeout=60,
         read_timeout=60,
         sse_customer_key=None,
+        multipart_threshold=None,
     ):
         self.bucket_name = bucket_name
         self._prefix = prefix.rstrip("/") if prefix else ""
+        threshold = multipart_threshold or _DEFAULT_MULTIPART_THRESHOLD
+        self._transfer_config = TransferConfig(
+            multipart_threshold=threshold,
+            max_concurrency=1,
+        )
 
         if self._prefix:
             if not re.fullmatch(r"[a-zA-Z0-9._/-]*", self._prefix):
@@ -111,6 +123,7 @@ class S3Client:
                 self.bucket_name,
                 full_key,
                 ExtraArgs=self._sse_extra_args or None,
+                Config=self._transfer_config,
             )
         except ClientError as e:
             self._wrap_client_error(e, "upload", s3_key)
