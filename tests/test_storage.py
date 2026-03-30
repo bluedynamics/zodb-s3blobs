@@ -537,6 +537,28 @@ class TestRelStorageTidExtraction:
         tid = storage.tpc_finish(txn)
         assert tid is not None
 
+    def test_lock_early_forced_for_relstorage(self, s3_env, tmp_path):
+        """When base storage is RelStorage, LOCK_EARLY must be forced."""
+        try:
+            import relstorage.storage.tpc.vote as vote_mod
+        except ImportError:
+            pytest.skip("RelStorage not installed")
+
+        from zodb_s3blobs.storage import _ensure_relstorage_lock_early
+
+        import zodb_s3blobs.storage as storage_mod
+
+        original = vote_mod.LOCK_EARLY
+        original_flag = storage_mod._relstorage_lock_early_applied
+        try:
+            vote_mod.LOCK_EARLY = False
+            storage_mod._relstorage_lock_early_applied = False
+            _ensure_relstorage_lock_early()
+            assert vote_mod.LOCK_EARLY is True
+        finally:
+            vote_mod.LOCK_EARLY = original
+            storage_mod._relstorage_lock_early_applied = original_flag
+
     def test_extract_base_tid_raises_on_unknown_storage(
         self, s3_env, s3_client, blob_cache, tmp_path
     ):
