@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.6
+
+- Fix S3 multipart uploads failing on Ceph-based providers (Hetzner,
+  DigitalOcean Spaces, etc.) with `400 Bad Request`. Root cause: boto3
+  >= 1.36.0 sends CRC checksum headers that non-AWS backends reject.
+  Fixed by setting `request_checksum_calculation="when_required"` in the
+  botocore Config. Multipart uploads now work correctly on all providers.
+- Remove `multipart_threshold` parameter and `S3_MULTIPART_THRESHOLD`
+  env var (workaround no longer needed).
+- Add `s3_max_concurrency` parameter (default: 1) to control parallel
+  part upload threads per file.
+- Require `boto3 >= 1.36.0`, `s3transfer >= 0.11.2`.
+
 ## 1.0.5
 
 - Add `multipart_threshold` parameter to `S3Client` (default: 500 MB).
