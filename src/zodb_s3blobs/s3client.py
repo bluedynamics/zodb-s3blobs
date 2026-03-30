@@ -15,11 +15,6 @@ import tempfile
 
 logger = logging.getLogger(__name__)
 
-# Default: 500 MB — avoids multipart uploads for typical blob sizes.
-# S3-compatible providers (e.g. Hetzner) often reject UploadPart requests.
-# AWS users who want multipart can lower this via multipart_threshold.
-_DEFAULT_MULTIPART_THRESHOLD = 500 * 1024 * 1024
-
 
 class S3OperationError(Exception):
     """Wraps boto3 ClientError to avoid leaking AWS infrastructure details."""
@@ -42,14 +37,12 @@ class S3Client:
         connect_timeout=60,
         read_timeout=60,
         sse_customer_key=None,
-        multipart_threshold=None,
+        s3_max_concurrency=1,
     ):
         self.bucket_name = bucket_name
         self._prefix = prefix.rstrip("/") if prefix else ""
-        threshold = multipart_threshold or _DEFAULT_MULTIPART_THRESHOLD
         self._transfer_config = TransferConfig(
-            multipart_threshold=threshold,
-            max_concurrency=1,
+            max_concurrency=s3_max_concurrency,
         )
 
         if self._prefix:
@@ -79,6 +72,8 @@ class S3Client:
             self._sse_extra_args = {}
 
         config = Config(
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
             s3={"addressing_style": addressing_style},
             connect_timeout=connect_timeout,
             read_timeout=read_timeout,
