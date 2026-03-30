@@ -12,6 +12,10 @@
 - Add `s3_max_concurrency` parameter (default: 1) to control parallel
   part upload threads per file.
 - Require `boto3 >= 1.36.0`, `s3transfer >= 0.11.2`.
+- Fix `AttributeError: 'RelStorage' object has no attribute '_tid'` when using
+  RelStorage as base storage (#8). S3BlobStorage now extracts the TID from
+  RelStorage's internal TPC phase object and forces `LOCK_EARLY` so the TID is
+  available during `tpc_vote` for S3 key construction.
 
 ## 1.0.5
 

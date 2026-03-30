@@ -13,6 +13,38 @@ import zope.interface
 
 logger = logging.getLogger(__name__)
 
+_relstorage_lock_early_applied = False
+
+
+def _ensure_relstorage_lock_early():
+    """Force RelStorage to allocate TID during tpc_vote (LOCK_EARLY).
+
+    RelStorage 3.x defers TID allocation to tpc_finish for shorter lock
+    hold times. S3BlobStorage needs the TID in tpc_vote to construct the
+    S3 key before uploading. Without LOCK_EARLY, the TID is not available.
+
+    This monkey-patches the module-level LOCK_EARLY flag in
+    relstorage.storage.tpc.vote. The flag is read by AbstractVote._vote()
+    to decide whether to call _lock_and_move(vote_only=True).
+
+    Safe to call multiple times (idempotent).
+    """
+    global _relstorage_lock_early_applied
+    if _relstorage_lock_early_applied:
+        return
+    try:
+        import relstorage.storage.tpc.vote as vote_mod
+    except ImportError:
+        return
+    if not vote_mod.LOCK_EARLY:
+        vote_mod.LOCK_EARLY = True
+        logger.info(
+            "Forced RELSTORAGE_LOCK_EARLY=True for S3BlobStorage "
+            "TID availability during tpc_vote"
+        )
+    _relstorage_lock_early_applied = True
+
+
 _BLOB_KEY_RE = re.compile(r"^blobs/([0-9a-f]+)/[0-9a-f]+\.blob$")
 
 
@@ -33,6 +65,11 @@ class S3BlobStorage:
         self._uploaded_keys = []  # [(oid, tid, s3_key)]
         self._temp_dir = temp_dir or tempfile.mkdtemp()
         os.makedirs(self._temp_dir, exist_ok=True, mode=0o700)
+
+        # Force LOCK_EARLY if RelStorage is involved so TID is
+        # available during tpc_vote for S3 key construction.
+        if hasattr(base_storage, "_tpc_phase"):
+            _ensure_relstorage_lock_early()
 
     def __getattr__(self, name):
         return getattr(self.__storage, name)
@@ -93,12 +130,12 @@ class S3BlobStorage:
 
     def tpc_vote(self, transaction):
         self.__storage.tpc_vote(transaction)
-        # _tid is now available from base storage via __getattr__
-        tid = self._tid
-        for oid, staged_path in self._pending_blobs.items():
-            key = self._s3_key(oid, tid)
-            self._s3_client.upload_file(staged_path, key)
-            self._uploaded_keys.append((oid, tid, key))
+        if self._pending_blobs:
+            tid = self._extract_base_tid()
+            for oid, staged_path in self._pending_blobs.items():
+                key = self._s3_key(oid, tid)
+                self._s3_client.upload_file(staged_path, key)
+                self._uploaded_keys.append((oid, tid, key))
 
     def tpc_finish(self, transaction, func=lambda tid: None):
         tid = self.__storage.tpc_finish(transaction, func)
@@ -185,6 +222,32 @@ class S3BlobStorage:
             return None
 
     # -- Helpers --
+
+    def _extract_base_tid(self):
+        """Extract the current transaction TID from the base storage.
+
+        Supports two storage backends:
+        - BaseStorage subclasses (MappingStorage, FileStorage): ``_tid`` attribute
+        - RelStorage: ``_tpc_phase.committing_tid_lock.tid``
+          (requires LOCK_EARLY so TID is allocated during tpc_vote)
+        """
+        # BaseStorage path (MappingStorage, FileStorage)
+        tid = getattr(self.__storage, "_tid", None)
+        if tid is not None:
+            return tid
+        # RelStorage path: TID lives in the TPC phase's lock object
+        phase = getattr(self.__storage, "_tpc_phase", None)
+        if phase is not None:
+            lock = getattr(phase, "committing_tid_lock", None)
+            if lock is not None:
+                tid = getattr(lock, "tid", None)
+                if tid is not None:
+                    return tid
+        raise RuntimeError(
+            "Cannot determine TID after tpc_vote. "
+            "The base storage must expose _tid (BaseStorage) "
+            "or _tpc_phase.committing_tid_lock.tid (RelStorage with LOCK_EARLY)."
+        )
 
     def _s3_key(self, oid, tid):
         return f"blobs/{_oid_hex(oid)}/{_tid_hex(tid)}.blob"

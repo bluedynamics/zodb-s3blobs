@@ -70,6 +70,13 @@ Blobs go to S3 instead of the `blob_chunk` table. RelStorage still handles objec
 </zodb_db>
 ```
 
+**Note:** When wrapping RelStorage, `zodb-s3blobs` automatically enables
+RelStorage's `LOCK_EARLY` mode (equivalent to `RELSTORAGE_LOCK_EARLY=1`). This
+causes the database commit lock to be held slightly longer — through the S3 blob
+upload — to ensure transactional consistency. This is the same behavior as
+RelStorage 2.x and is required so that blob uploads complete before the
+transaction commits.
+
 ## Configuration Reference
 
 | Parameter | Default | Description |

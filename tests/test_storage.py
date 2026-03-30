@@ -315,7 +315,8 @@ class TestLoadPendingBlob:
         storage.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
         storage.tpc_vote(txn)
 
-        result = storage.loadBlob(oid, storage._tid)
+        tid = storage._extract_base_tid()
+        result = storage.loadBlob(oid, tid)
         assert os.path.exists(result)
         with open(result, "rb") as f:
             assert f.read() == blob_content
@@ -459,6 +460,133 @@ class TestDirectoryPermissions:
     def test_cache_dir_mode(self, blob_cache):
         mode = stat.S_IMODE(os.stat(blob_cache.cache_dir).st_mode)
         assert mode == 0o700
+
+
+class TestRelStorageTidExtraction:
+    """Test TID extraction from RelStorage-like base storages."""
+
+    def _make_relstorage_mock(self, tmp_path):
+        """Create a mock storage that behaves like RelStorage after tpc_vote.
+
+        RelStorage stores TID in _tpc_phase.committing_tid_lock.tid
+        instead of _tid.  We simulate this by moving the TID out of _tid
+        during tpc_vote, and restoring it just before tpc_finish so
+        MappingStorage's own tpc_finish still works.
+        """
+        base = MappingStorage()
+        original_tpc_vote = base.tpc_vote
+        original_tpc_finish = base.tpc_finish
+
+        class FakeCommittingTidLock:
+            def __init__(self, tid):
+                self.tid = tid
+                self.tid_int = int.from_bytes(tid)
+
+        class FakeTPCPhase:
+            committing_tid_lock = None
+
+        base._tpc_phase = FakeTPCPhase()
+
+        def patched_tpc_vote(transaction):
+            original_tpc_vote(transaction)
+            tid = base._tid
+            base._tpc_phase.committing_tid_lock = FakeCommittingTidLock(tid)
+            del base._tid
+
+        def patched_tpc_finish(transaction, func=lambda tid: None):
+            # Restore _tid so MappingStorage.tpc_finish can work
+            base._tid = base._tpc_phase.committing_tid_lock.tid
+            return original_tpc_finish(transaction, func)
+
+        base.tpc_vote = patched_tpc_vote
+        base.tpc_finish = patched_tpc_finish
+        return base
+
+    def test_tpc_vote_works_with_relstorage_like_base(
+        self, s3_env, s3_client, blob_cache, tmp_path
+    ):
+        base = self._make_relstorage_mock(tmp_path)
+        storage = S3BlobStorage(
+            base, s3_client, blob_cache, temp_dir=str(tmp_path / "staging")
+        )
+
+        oid = p64(1)
+        blob_path = _make_blob_file(tmp_path, b"relstorage test")
+        txn = transaction.get()
+        storage.tpc_begin(txn)
+        storage.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
+        storage.tpc_vote(txn)
+
+        keys = list(s3_client.list_objects("blobs/"))
+        assert len(keys) == 1
+
+        tid = storage.tpc_finish(txn)
+        assert tid is not None
+
+    def test_tpc_vote_still_works_with_basestorage(self, storage, s3_client, tmp_path):
+        """Verify MappingStorage (BaseStorage) still works after the change."""
+        oid = p64(1)
+        blob_path = _make_blob_file(tmp_path, b"basestorage test")
+        txn = transaction.get()
+        storage.tpc_begin(txn)
+        storage.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
+        storage.tpc_vote(txn)
+
+        keys = list(s3_client.list_objects("blobs/"))
+        assert len(keys) == 1
+
+        tid = storage.tpc_finish(txn)
+        assert tid is not None
+
+    def test_lock_early_forced_for_relstorage(self, s3_env, tmp_path):
+        """When base storage is RelStorage, LOCK_EARLY must be forced."""
+        try:
+            import relstorage.storage.tpc.vote as vote_mod
+        except ImportError:
+            pytest.skip("RelStorage not installed")
+
+        from zodb_s3blobs.storage import _ensure_relstorage_lock_early
+
+        import zodb_s3blobs.storage as storage_mod
+
+        original = vote_mod.LOCK_EARLY
+        original_flag = storage_mod._relstorage_lock_early_applied
+        try:
+            vote_mod.LOCK_EARLY = False
+            storage_mod._relstorage_lock_early_applied = False
+            _ensure_relstorage_lock_early()
+            assert vote_mod.LOCK_EARLY is True
+        finally:
+            vote_mod.LOCK_EARLY = original
+            storage_mod._relstorage_lock_early_applied = original_flag
+
+    def test_extract_base_tid_raises_on_unknown_storage(
+        self, s3_env, s3_client, blob_cache, tmp_path
+    ):
+        """If neither _tid nor RelStorage path exists, raise RuntimeError."""
+        base = MappingStorage()
+        storage = S3BlobStorage(
+            base, s3_client, blob_cache, temp_dir=str(tmp_path / "staging")
+        )
+
+        oid = p64(1)
+        blob_path = _make_blob_file(tmp_path, b"unknown storage")
+        txn = transaction.get()
+        storage.tpc_begin(txn)
+        storage.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
+
+        original_vote = base.tpc_vote
+
+        def vote_no_tid(transaction):
+            original_vote(transaction)
+            del base._tid
+
+        base.tpc_vote = vote_no_tid
+
+        with pytest.raises(RuntimeError, match="Cannot determine TID"):
+            storage.tpc_vote(txn)
+
+        storage.tpc_abort(txn)
 
 
 class TestClose:
