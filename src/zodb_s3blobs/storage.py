@@ -93,12 +93,12 @@ class S3BlobStorage:
 
     def tpc_vote(self, transaction):
         self.__storage.tpc_vote(transaction)
-        # _tid is now available from base storage via __getattr__
-        tid = self._tid
-        for oid, staged_path in self._pending_blobs.items():
-            key = self._s3_key(oid, tid)
-            self._s3_client.upload_file(staged_path, key)
-            self._uploaded_keys.append((oid, tid, key))
+        if self._pending_blobs:
+            tid = self._extract_base_tid()
+            for oid, staged_path in self._pending_blobs.items():
+                key = self._s3_key(oid, tid)
+                self._s3_client.upload_file(staged_path, key)
+                self._uploaded_keys.append((oid, tid, key))
 
     def tpc_finish(self, transaction, func=lambda tid: None):
         tid = self.__storage.tpc_finish(transaction, func)
@@ -185,6 +185,32 @@ class S3BlobStorage:
             return None
 
     # -- Helpers --
+
+    def _extract_base_tid(self):
+        """Extract the current transaction TID from the base storage.
+
+        Supports two storage backends:
+        - BaseStorage subclasses (MappingStorage, FileStorage): ``_tid`` attribute
+        - RelStorage: ``_tpc_phase.committing_tid_lock.tid``
+          (requires LOCK_EARLY so TID is allocated during tpc_vote)
+        """
+        # BaseStorage path (MappingStorage, FileStorage)
+        tid = getattr(self.__storage, "_tid", None)
+        if tid is not None:
+            return tid
+        # RelStorage path: TID lives in the TPC phase's lock object
+        phase = getattr(self.__storage, "_tpc_phase", None)
+        if phase is not None:
+            lock = getattr(phase, "committing_tid_lock", None)
+            if lock is not None:
+                tid = getattr(lock, "tid", None)
+                if tid is not None:
+                    return tid
+        raise RuntimeError(
+            "Cannot determine TID after tpc_vote. "
+            "The base storage must expose _tid (BaseStorage) "
+            "or _tpc_phase.committing_tid_lock.tid (RelStorage with LOCK_EARLY)."
+        )
 
     def _s3_key(self, oid, tid):
         return f"blobs/{_oid_hex(oid)}/{_tid_hex(tid)}.blob"
