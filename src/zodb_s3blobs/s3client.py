@@ -35,7 +35,7 @@ class S3Client:
         use_ssl=True,
         addressing_style="auto",
         connect_timeout=60,
-        read_timeout=60,
+        read_timeout=300,
         sse_customer_key=None,
         s3_max_concurrency=1,
     ):

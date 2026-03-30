@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.7
+
+- Increase default `read_timeout` from 60 to 300 seconds. The 60s timeout
+  caused false retries during concurrent uploads — botocore interpreted slow
+  S3 responses as timeouts and retried, making every affected upload take
+  exactly ~60 seconds regardless of blob size.
+
 ## 1.0.6
 
 - Fix S3 multipart uploads failing on Ceph-based providers (Hetzner,
