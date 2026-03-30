@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.8
+
+- Re-add `multipart_threshold` parameter (default: 5 GB) to disable multipart
+  uploads. Hetzner S3 still returns intermittent `400 Bad Request` on
+  `UploadPart` despite the checksum fix in 1.0.6. Single PUT requests up to
+  5 GB (S3 limit) are reliable on all providers. Fixes #13.
+
 ## 1.0.7
 
 - Increase default `read_timeout` from 60 to 300 seconds. The 60s timeout

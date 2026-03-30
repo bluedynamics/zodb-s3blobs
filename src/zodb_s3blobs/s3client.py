@@ -38,10 +38,12 @@ class S3Client:
         read_timeout=300,
         sse_customer_key=None,
         s3_max_concurrency=1,
+        multipart_threshold=5 * 1024 * 1024 * 1024,
     ):
         self.bucket_name = bucket_name
         self._prefix = prefix.rstrip("/") if prefix else ""
         self._transfer_config = TransferConfig(
+            multipart_threshold=multipart_threshold,
             max_concurrency=s3_max_concurrency,
         )
 
