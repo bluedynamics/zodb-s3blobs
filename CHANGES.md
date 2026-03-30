@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.5
+
+- Add `multipart_threshold` parameter to `S3Client` (default: 500 MB).
+  Hetzner Object Storage (and some other S3-compatible providers) return
+  400 Bad Request on `UploadPart` operations. The high default avoids
+  multipart uploads for typical blob sizes. AWS users who want multipart
+  for large files can lower the threshold.
+
 ## 1.0.4
 
 - Increase S3 `max_pool_connections` from 10 to 50 to prevent connection pool
