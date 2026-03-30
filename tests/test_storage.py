@@ -315,7 +315,8 @@ class TestLoadPendingBlob:
         storage.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
         storage.tpc_vote(txn)
 
-        result = storage.loadBlob(oid, storage._tid)
+        tid = storage._extract_base_tid()
+        result = storage.loadBlob(oid, tid)
         assert os.path.exists(result)
         with open(result, "rb") as f:
             assert f.read() == blob_content
