@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 (unreleased)
+
+- Add the `LICENSE.txt` file with the full Zope Public License 2.1 text.
+  The packaging metadata already declared `ZPL-2.1`, but the license text
+  itself was missing from the repository, so GitHub reported "No license" and
+  the terms could not be verified from the source tree alone. Fixes #17.
+
 ## 1.1.0
 
 - Add `multipart_threshold` parameter (default: 5 GB) to disable multipart
