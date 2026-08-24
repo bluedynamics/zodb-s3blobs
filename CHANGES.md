@@ -2,6 +2,11 @@
 
 ## 1.1.1 (unreleased)
 
+- Bump `hynek/build-and-inspect-python-package` from v2 to v3.0.1. Hatchling now
+  emits `Metadata-Version: 2.5`, which the Twine bundled in v2 rejects with
+  `InvalidDistribution: '2.5' is not a valid metadata version` — the release
+  build failed before uploading anything. v3 ships Twine 7, which supports it.
+
 - Add the `LICENSE.txt` file with the full Zope Public License 2.1 text.
   The packaging metadata already declared `ZPL-2.1`, but the license text
   itself was missing from the repository, so GitHub reported "No license" and
