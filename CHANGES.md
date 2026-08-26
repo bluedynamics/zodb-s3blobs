@@ -2,6 +2,9 @@
 
 ## 1.1.1 (unreleased)
 
+- Lower ruff's C901 max-complexity threshold from 15 to 13 as part of the
+  ecosystem-wide complexity ratchet. The code base passes as-is.
+
 - Enable ruff's cyclomatic-complexity check (`C901`, mccabe) with
   `max-complexity = 15`. The code base passes as-is.
 
