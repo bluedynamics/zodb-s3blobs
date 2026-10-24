@@ -2,6 +2,7 @@
 
 from moto import mock_aws
 from ZODB.MappingStorage import MappingStorage
+from ZODB.tests.MVCCMappingStorage import MVCCMappingStorage
 from ZODB.utils import p64
 from zodb_s3blobs.cache import S3BlobCache
 from zodb_s3blobs.s3client import S3Client
@@ -12,6 +13,7 @@ import os
 import pytest
 import transaction
 import ZODB
+import ZODB.interfaces
 
 
 @pytest.fixture
@@ -314,3 +316,64 @@ class TestMVCC:
         path = new_storage.loadBlob(oid, tid)
         with open(path, "rb") as f:
             assert f.read() == b"mvcc test"
+
+
+class TestMVCCBase:
+    """With an IMVCCStorage base (e.g. RelStorage), the wrapper must be one too."""
+
+    def _wrap(self, base, s3_client, blob_cache, tmp_path, name):
+        return S3BlobStorage(base, s3_client, blob_cache, temp_dir=str(tmp_path / name))
+
+    def test_provides_imvccstorage_only_if_base_does(
+        self, s3_client, blob_cache, tmp_path
+    ):
+        plain = self._wrap(MappingStorage(), s3_client, blob_cache, tmp_path, "a")
+        mvcc = self._wrap(MVCCMappingStorage(), s3_client, blob_cache, tmp_path, "b")
+        assert not ZODB.interfaces.IMVCCStorage.providedBy(plain)
+        assert ZODB.interfaces.IMVCCStorage.providedBy(mvcc)
+        assert ZODB.interfaces.IMVCCStorage.providedBy(mvcc.new_instance())
+
+    def test_connection_uses_wrapper_instance(self, s3_client, blob_cache, tmp_path):
+        storage = self._wrap(MVCCMappingStorage(), s3_client, blob_cache, tmp_path, "s")
+        db = ZODB.DB(storage)
+        conn = db.open()
+        assert isinstance(conn._storage, S3BlobStorage)
+        assert conn._storage is not storage
+        conn.close()
+        db.close()
+
+    def test_sees_commits_from_another_process(self, s3_client, blob_cache, tmp_path):
+        """Two DBs on one MVCC database, like two processes on one RelStorage."""
+        shared = MVCCMappingStorage()
+        db_a = ZODB.DB(
+            self._wrap(shared.new_instance(), s3_client, blob_cache, tmp_path, "a")
+        )
+        db_b = ZODB.DB(
+            self._wrap(shared.new_instance(), s3_client, blob_cache, tmp_path, "b")
+        )
+        tm_a = transaction.TransactionManager()
+        tm_b = transaction.TransactionManager()
+        conn_a = db_a.open(tm_a)
+        conn_b = db_b.open(tm_b)
+
+        conn_a.root()["x"] = 1
+        tm_a.commit()
+        tm_b.begin()
+        assert conn_b.root()["x"] == 1
+
+        conn_a.root()["x"] = 2
+        tm_a.commit()
+        tm_b.begin()
+        assert conn_b.root()["x"] == 2
+
+        conn_a.close()
+        conn_b.close()
+        db_a.close()
+        db_b.close()
+
+    def test_release_removes_instance_temp_dir(self, s3_client, blob_cache, tmp_path):
+        storage = self._wrap(MVCCMappingStorage(), s3_client, blob_cache, tmp_path, "s")
+        instance = storage.new_instance()
+        assert os.path.isdir(instance.temporaryDirectory())
+        instance.release()
+        assert not os.path.exists(instance.temporaryDirectory())

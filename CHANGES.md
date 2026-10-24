@@ -13,6 +13,13 @@
   `s3-download-read-timeout` and `s3-download-max-attempts` keys and the
   matching `S3Client` arguments. Fixes #25.
 
+- Provide `IMVCCStorage` when the base storage does (e.g. RelStorage).
+  Previously `ZODB.DB` wrapped `S3BlobStorage` in an `MVCCAdapter`, which
+  never polls the base storage for invalidations, so a process didn't see
+  commits made by other processes. Connections now get their own
+  `S3BlobStorage` instance from `new_instance()`, and `release()` removes its
+  temporary directory.
+
 - Lower ruff's C901 max-complexity threshold from 15 to 13 as part of the
   ecosystem-wide complexity ratchet. The code base passes as-is.
 

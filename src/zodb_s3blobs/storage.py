@@ -55,6 +55,8 @@ class S3BlobStorage:
     Wraps any base storage via __getattr__ proxy pattern.
     All blob methods are explicitly defined to shadow the base
     storage's methods (if any).
+
+    Provides IMVCCStorage when the base storage does (e.g. RelStorage).
     """
 
     def __init__(self, base_storage, s3_client, cache, temp_dir=None):
@@ -65,6 +67,12 @@ class S3BlobStorage:
         self._uploaded_keys = []  # [(oid, tid, s3_key)]
         self._temp_dir = temp_dir or tempfile.mkdtemp()
         os.makedirs(self._temp_dir, exist_ok=True, mode=0o700)
+
+        # Otherwise ZODB.DB wraps us in an MVCCAdapter, which never polls
+        # an MVCC base for invalidations: commits from other processes
+        # stay invisible.
+        if ZODB.interfaces.IMVCCStorage.providedBy(base_storage):
+            zope.interface.alsoProvides(self, ZODB.interfaces.IMVCCStorage)
 
         # Force LOCK_EARLY if RelStorage is involved so TID is
         # available during tpc_vote for S3 key construction.
@@ -182,6 +190,13 @@ class S3BlobStorage:
         # Each MVCC instance gets its own temp dir to avoid file name collisions
         instance_temp = tempfile.mkdtemp(dir=self._temp_dir)
         return S3BlobStorage(base, self._s3_client, self._cache, instance_temp)
+
+    def release(self):
+        # Called by ZODB on an IMVCCStorage instance when its connection
+        # is discarded.
+        self.__storage.release()
+        with contextlib.suppress(OSError):
+            shutil.rmtree(self._temp_dir)
 
     def close(self):
         self.__storage.close()
