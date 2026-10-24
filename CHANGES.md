@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1 (unreleased)
+
+- Fix the environment variable syntax in the README and the ZConfig key
+  descriptions: ZConfig expands `$(NAME)` from the environment; `$NAME` and
+  `${NAME}` only expand `%define` names, so the documented `$S3_ACCESS_KEY`
+  failed at startup with `SubstitutionReplacementError`.
+
+- README: describe the `IMVCCStorage` support (#23) and the extended pack
+  garbage collection (#24) in the feature list and the RelStorage section,
+  and warn that the first pack after upgrading to 1.2.0 can delete many S3
+  objects.
+
 ## 1.2.0
 
 - Give blob downloads and HEAD requests their own S3 client with short
