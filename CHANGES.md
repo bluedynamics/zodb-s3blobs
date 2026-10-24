@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 (unreleased)
+## 1.2.0
 
 - Give blob downloads and HEAD requests their own S3 client with short
   timeouts and bounded retries: connect 5 s, read 10 s, two botocore attempts
