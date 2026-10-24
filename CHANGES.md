@@ -20,6 +20,14 @@
   `S3BlobStorage` instance from `new_instance()`, and `release()` removes its
   temporary directory.
 
+- Fix blob garbage collection on pack. Blobs of superseded revisions were
+  never deleted, only those of objects removed entirely. Pack now deletes every
+  blob whose revision the base storage no longer has, and keeps those a
+  history-preserving storage keeps after `pack_time` (read from `object_state`
+  on history-preserving RelStorage). It also no longer deletes blobs of
+  transactions that are still committing: a new object's blob is uploaded in
+  `tpc_vote`, before the object can be loaded, and was removed as an orphan.
+
 - Lower ruff's C901 max-complexity threshold from 15 to 13 as part of the
   ecosystem-wide complexity ratchet. The code base passes as-is.
 

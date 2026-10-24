@@ -1,6 +1,7 @@
 from moto import mock_aws
 from ZODB.MappingStorage import MappingStorage
 from ZODB.utils import p64
+from ZODB.utils import z64
 from zodb_s3blobs.cache import S3BlobCache
 from zodb_s3blobs.s3client import S3Client
 from zodb_s3blobs.storage import S3BlobStorage
@@ -355,11 +356,11 @@ class TestNewInstance:
 
 
 class TestPack:
-    def _store_blob_and_commit(self, storage, oid, blob_content, tmp_path):
+    def _store_blob_and_commit(self, storage, oid, blob_content, tmp_path, serial=z64):
         blob_path = _make_blob_file(tmp_path, blob_content)
         txn = transaction.get()
         storage.tpc_begin(txn)
-        storage.storeBlob(oid, p64(0), b"pickle", blob_path, "", txn)
+        storage.storeBlob(oid, serial, b"pickle", blob_path, "", txn)
         storage.tpc_vote(txn)
         return storage.tpc_finish(txn)
 
@@ -418,38 +419,154 @@ class TestPack:
         keys_after = list(s3_client.list_objects("blobs/"))
         assert len(keys_after) == 0
 
+    def _keys(self, s3_client):
+        return set(s3_client.list_objects("blobs/"))
 
-class TestOidFromKey:
+    def _key(self, oid, tid):
+        from zodb_s3blobs.storage import _oid_hex
+        from zodb_s3blobs.storage import _tid_hex
+
+        return f"blobs/{_oid_hex(oid)}/{_tid_hex(tid)}.blob"
+
+    def test_pack_keeps_blobs_of_revisions_the_base_keeps(
+        self, storage, s3_client, tmp_path
+    ):
+        """MappingStorage keeps the revision current at pack time and newer ones."""
+        import time
+
+        self._store_root(storage)
+        oid = p64(1)
+        tid1 = self._store_blob_and_commit(storage, oid, b"one", tmp_path)
+        time.sleep(0.01)
+        tid2 = self._store_blob_and_commit(storage, oid, b"two", tmp_path, tid1)
+        time.sleep(0.01)
+        pack_time = time.time()
+        time.sleep(0.01)
+        tid3 = self._store_blob_and_commit(storage, oid, b"three", tmp_path, tid2)
+
+        storage.pack(pack_time, lambda p: [p64(1)])
+
+        assert self._keys(s3_client) == {self._key(oid, tid2), self._key(oid, tid3)}
+        assert self._key(oid, tid1) not in self._keys(s3_client)
+
+    def test_pack_keeps_keys_newer_than_last_transaction(
+        self, storage, s3_client, tmp_path
+    ):
+        """A key uploaded by a transaction that hasn't finished is not deleted."""
+        from ZODB.utils import u64
+
+        import time
+
+        self._store_root(storage)
+        oid = p64(1)
+        self._store_blob_and_commit(storage, oid, b"current", tmp_path)
+        in_flight = [
+            self._key(oid, p64(u64(storage.lastTransaction()) + 1)),
+            self._key(p64(2), p64(u64(storage.lastTransaction()) + 1)),
+        ]
+        for key in in_flight:
+            s3_client.upload_file(_make_blob_file(tmp_path, b"in flight"), key)
+
+        storage.pack(time.time(), lambda p: [p64(1)])
+
+        assert set(in_flight) <= self._keys(s3_client)
+
+    def test_pack_logs_failed_delete(self, storage, s3_client, tmp_path, caplog):
+        import time
+
+        self._store_root(storage)
+        s3_client.upload_file(_make_blob_file(tmp_path, b"orphan"), "blobs/3e7/1.blob")
+
+        def fail(key):
+            raise RuntimeError("boom")
+
+        s3_client.delete_object = fail
+        storage.pack(time.time(), lambda p: [])
+
+        assert "GC: failed to delete S3 key blobs/3e7/1.blob" in caplog.text
+
+    def test_pack_history_preserving_relstorage_uses_object_state(
+        self, storage, s3_client, tmp_path
+    ):
+        """Revisions are read from object_state; a fake adapter stands in for
+        RelStorage."""
+        import time
+
+        self._store_root(storage)
+        oid = p64(1)
+        current_tid = self._store_blob_and_commit(storage, oid, b"current", tmp_path)
+        kept = self._key(oid, p64(500))
+        dropped = self._key(oid, p64(100))
+        for key in (kept, dropped):
+            s3_client.upload_file(_make_blob_file(tmp_path, b"old"), key)
+
+        rows = [(1, 500), (1, int.from_bytes(current_tid, "big"))]
+
+        class FakeCursor:
+            def execute(self, sql, params):
+                assert sql.count("%s") == len(params)
+                self.result = [r for r in rows if r[0] in params]
+
+            def fetchall(self):
+                return self.result
+
+        class FakeConnManager:
+            closed = False
+
+            def open_for_load(self):
+                return object(), FakeCursor()
+
+            def close(self, conn, cursor):
+                self.closed = True
+
+        class FakeAdapter:
+            connmanager = FakeConnManager()
+
+        class FakeOptions:
+            keep_history = True
+
+        base = storage._S3BlobStorage__storage
+        base._options = FakeOptions()
+        base._adapter = FakeAdapter()
+
+        storage.pack(time.time(), lambda p: [p64(1)])
+
+        assert self._keys(s3_client) == {kept, self._key(oid, current_tid)}
+        assert base._adapter.connmanager.closed
+
+
+class TestRevisionFromKey:
     def test_valid_key(self):
-        oid = S3BlobStorage._oid_from_key("blobs/1/2.blob")
-        assert oid == p64(1)
+        assert S3BlobStorage._revision_from_key("blobs/1/2.blob") == (p64(1), 2)
 
     def test_short_key_returns_none(self):
-        assert S3BlobStorage._oid_from_key("noslash") is None
+        assert S3BlobStorage._revision_from_key("noslash") is None
 
     def test_non_hex_returns_none(self):
-        assert S3BlobStorage._oid_from_key("blobs/notahex/1.blob") is None
+        assert S3BlobStorage._revision_from_key("blobs/notahex/1.blob") is None
+        assert S3BlobStorage._revision_from_key("blobs/1/notahex.blob") is None
 
     def test_overflow_returns_none(self):
         huge_hex = "f" * 40  # much larger than 8-byte OID can hold
-        assert S3BlobStorage._oid_from_key(f"blobs/{huge_hex}/1.blob") is None
+        assert S3BlobStorage._revision_from_key(f"blobs/{huge_hex}/1.blob") is None
 
     def test_rejects_non_blob_extension(self):
-        assert S3BlobStorage._oid_from_key("blobs/1/2.json") is None
+        assert S3BlobStorage._revision_from_key("blobs/1/2.json") is None
 
     def test_rejects_missing_blobs_prefix(self):
-        assert S3BlobStorage._oid_from_key("other/1/2.blob") is None
+        assert S3BlobStorage._revision_from_key("other/1/2.blob") is None
 
     def test_rejects_uppercase_hex(self):
-        assert S3BlobStorage._oid_from_key("blobs/FF/1.blob") is None
+        assert S3BlobStorage._revision_from_key("blobs/FF/1.blob") is None
 
     def test_rejects_extra_segments(self):
-        assert S3BlobStorage._oid_from_key("blobs/extra/1/2.blob") is None
+        assert S3BlobStorage._revision_from_key("blobs/extra/1/2.blob") is None
 
     def test_valid_key_with_long_oid(self):
-        oid = S3BlobStorage._oid_from_key("blobs/1a2b3c4d5e6f/abc.blob")
-        assert oid is not None
-        assert oid == p64(0x1A2B3C4D5E6F)
+        assert S3BlobStorage._revision_from_key("blobs/1a2b3c4d5e6f/abc.blob") == (
+            p64(0x1A2B3C4D5E6F),
+            0xABC,
+        )
 
 
 class TestDirectoryPermissions:

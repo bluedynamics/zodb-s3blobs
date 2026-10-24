@@ -1,8 +1,10 @@
+import collections
 import contextlib
 import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 import ZODB.blob
 import ZODB.interfaces
@@ -45,7 +47,8 @@ def _ensure_relstorage_lock_early():
     _relstorage_lock_early_applied = True
 
 
-_BLOB_KEY_RE = re.compile(r"^blobs/([0-9a-f]+)/[0-9a-f]+\.blob$")
+_BLOB_KEY_RE = re.compile(r"^blobs/([0-9a-f]+)/([0-9a-f]+)\.blob$")
+_OBJECT_STATE_BATCH = 500
 
 
 @zope.interface.implementer(ZODB.interfaces.IBlobStorage)
@@ -209,30 +212,120 @@ class S3BlobStorage:
     # -- Pack / GC --
 
     def pack(self, pack_time, referencesf):
-        # Pack the base storage first
-        self.__storage.pack(pack_time, referencesf)
-        # GC: remove S3 keys for unreachable OIDs
-        for key in self._s3_client.list_objects("blobs/"):
-            oid = self._oid_from_key(key)
-            if oid is None:
-                continue
-            try:
-                self.__storage.load(oid)
-            except ZODB.POSException.POSKeyError:
-                logger.info("GC: removing orphaned S3 key %s", key)
+        """Pack the base storage, then delete S3 blobs it no longer references.
+
+        The key ``blobs/<oid>/<tid>.blob`` is kept while the base storage still
+        has revision ``tid`` of ``oid``. History-preserving storages keep the
+        revisions they need for ``loadBefore`` after ``pack_time``, so the
+        blobs of those revisions are kept too.
+        """
+        result = self.__storage.pack(pack_time, referencesf)
+        with self._gc_view() as view:
+            # Blobs are uploaded in tpc_vote, before the commit is visible:
+            # leave keys newer than the last committed transaction alone.
+            last_tid = ZODB.utils.u64(view.lastTransaction())
+            keys_by_oid = self._blob_keys_by_oid(last_tid)
+            live = self._live_revisions(view, keys_by_oid)
+        deleted = 0
+        for oid, keys in keys_by_oid.items():
+            live_tids = live.get(oid, ())
+            for tid, key in keys:
+                if tid in live_tids:
+                    continue
+                logger.info("GC: removing S3 key %s", key)
                 try:
                     self._s3_client.delete_object(key)
+                    deleted += 1
                 except Exception:
                     logger.warning("GC: failed to delete S3 key %s", key, exc_info=True)
+        logger.info("GC: deleted %d S3 keys", deleted)
+        return result
+
+    @contextlib.contextmanager
+    def _gc_view(self):
+        """Yield the base storage, or a fresh instance of an MVCC base.
+
+        RelStorage's root instance does not see commits made by other
+        processes; a freshly polled instance does.
+        """
+        base = self.__storage
+        if not ZODB.interfaces.IMVCCStorage.providedBy(base):
+            yield base
+            return
+        instance = base.new_instance()
+        try:
+            instance.poll_invalidations()
+            yield instance
+        finally:
+            instance.release()
+
+    def _blob_keys_by_oid(self, max_tid):
+        """Return ``{oid: [(tid, key), ...]}`` for keys with ``tid <= max_tid``."""
+        keys_by_oid = collections.defaultdict(list)
+        for key in self._s3_client.list_objects("blobs/"):
+            revision = self._revision_from_key(key)
+            if revision is None:
+                continue
+            oid, tid = revision
+            if tid <= max_tid:
+                keys_by_oid[oid].append((tid, key))
+        return keys_by_oid
+
+    def _live_revisions(self, view, oids):
+        """Return ``{oid: {tid, ...}}`` of the revisions the base storage has."""
+        if self._is_history_preserving_relstorage():
+            return self._live_revisions_from_object_state(oids)
+        live = {}
+        for oid in oids:
+            try:
+                records = view.history(oid, size=sys.maxsize)
+            except ZODB.POSException.POSKeyError:
+                continue
+            live[oid] = {ZODB.utils.u64(record["tid"]) for record in records}
+        return live
+
+    def _is_history_preserving_relstorage(self):
+        options = getattr(self.__storage, "_options", None)
+        return bool(getattr(options, "keep_history", False)) and hasattr(
+            self.__storage, "_adapter"
+        )
+
+    def _live_revisions_from_object_state(self, oids):
+        """History-preserving RelStorage: read revisions from ``object_state``.
+
+        ``history()`` omits the revision that was current at pack time,
+        although pack keeps it, so it can't be used here.
+        """
+        live = collections.defaultdict(set)
+        zoids = [ZODB.utils.u64(oid) for oid in oids]
+        connmanager = self.__storage._adapter.connmanager
+        conn, cursor = connmanager.open_for_load()
+        try:
+            # Stay under SQLite's default limit of 999 query parameters.
+            for i in range(0, len(zoids), _OBJECT_STATE_BATCH):
+                batch = zoids[i : i + _OBJECT_STATE_BATCH]
+                placeholders = ",".join(["%s"] * len(batch))
+                cursor.execute(
+                    f"SELECT zoid, tid FROM object_state WHERE zoid IN ({placeholders})",
+                    batch,
+                )
+                for zoid, tid in cursor.fetchall():
+                    live[ZODB.utils.p64(zoid)].add(tid)
+        finally:
+            connmanager.close(conn, cursor)
+        return live
 
     @staticmethod
-    def _oid_from_key(key):
-        """Extract oid bytes from S3 key like 'blobs/{oid_hex}/{tid_hex}.blob'."""
+    def _revision_from_key(key):
+        """Return ``(oid, tid)`` from a key like ``blobs/{oid_hex}/{tid_hex}.blob``.
+
+        ``oid`` is bytes, ``tid`` an int. Returns None for any other key.
+        """
         m = _BLOB_KEY_RE.match(key)
         if m is None:
             return None
         try:
-            return ZODB.utils.p64(int(m.group(1), 16))
+            return ZODB.utils.p64(int(m.group(1), 16)), int(m.group(2), 16)
         except (ValueError, OverflowError):
             return None
 

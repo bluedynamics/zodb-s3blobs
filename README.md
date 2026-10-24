@@ -140,7 +140,7 @@ Keep the worst case below any timeout that applies to the whole request. zodb-pg
 
 ### Garbage Collection
 
-During `pack()`, the base storage is packed first, then S3 is scanned for keys referencing OIDs that are no longer reachable. Orphaned keys are deleted. This also cleans up any objects left behind by failed abort operations.
+During `pack()`, the base storage is packed first. Then every S3 key whose revision (`oid`, `tid`) the base storage no longer has is deleted: blobs of unreachable objects, of revisions superseded before the pack time, and of aborted transactions whose cleanup failed. History-preserving storages keep the revision current at the pack time and any later ones, so those blobs stay too. Keys newer than the last committed transaction are left alone, as they may belong to a transaction that is still committing.
 
 ### S3 Bucket Security
 
