@@ -2,6 +2,9 @@
 
 ## 1.2.1 (unreleased)
 
+- Declare and test Python 3.15 support: trove classifier and CI test matrix.
+  The test suite passes on 3.15.0 without code changes.
+
 - Fix the environment variable syntax in the README and the ZConfig key
   descriptions: ZConfig expands `$(NAME)` from the environment; `$NAME` and
   `${NAME}` only expand `%define` names, so the documented `$S3_ACCESS_KEY`
