@@ -1,12 +1,17 @@
+from boto3.exceptions import RetriesExceededError
+from botocore.exceptions import ReadTimeoutError
 from moto import mock_aws
 from zodb_s3blobs.interfaces import IS3Client
 from zodb_s3blobs.s3client import S3Client
 
 import base64
 import boto3
+import http.server
 import os
 import pytest
 import stat
+import threading
+import time
 
 
 @pytest.fixture
@@ -292,3 +297,113 @@ class TestS3OperationError:
         from zodb_s3blobs.s3client import S3OperationError
 
         assert issubclass(S3OperationError, Exception)
+
+
+class TestTimeouts:
+    def test_upload_client_keeps_long_timeouts(self, client):
+        config = client._client.meta.config
+        assert config.connect_timeout == 60
+        assert config.read_timeout == 300
+
+    def test_download_client_defaults(self, client):
+        config = client._download_client.meta.config
+        assert config.connect_timeout == 5
+        assert config.read_timeout == 10
+        assert config.retries == {"mode": "standard", "total_max_attempts": 2}
+        assert client._download_transfer_config.num_download_attempts == 2
+
+    def test_download_client_shares_s3_settings(self, s3_env):
+        client = S3Client(
+            bucket_name="test-bucket",
+            region_name="us-east-1",
+            addressing_style="path",
+        )
+        config = client._download_client.meta.config
+        assert config.s3["addressing_style"] == "path"
+        assert config.request_checksum_calculation == "when_required"
+
+    def test_timeouts_configurable(self, s3_env):
+        client = S3Client(
+            bucket_name="test-bucket",
+            region_name="us-east-1",
+            connect_timeout=7,
+            read_timeout=70,
+            download_connect_timeout=2,
+            download_read_timeout=3,
+            download_max_attempts=4,
+        )
+        assert client._client.meta.config.connect_timeout == 7
+        assert client._client.meta.config.read_timeout == 70
+        download = client._download_client.meta.config
+        assert download.connect_timeout == 2
+        assert download.read_timeout == 3
+        assert download.retries["total_max_attempts"] == 4
+
+
+class _StallingHandler(http.server.BaseHTTPRequestHandler):
+    """Records each request and never answers it."""
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def _stall(self):
+        self.server.requests.append(self.command)
+        self.server.stop.wait()
+
+    do_GET = do_HEAD = _stall
+
+
+@pytest.fixture
+def stalling_s3():
+    """S3 client against a local endpoint where every request stalls (#25)."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _StallingHandler)
+    server.daemon_threads = True
+    server.requests = []
+    server.stop = threading.Event()
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    client = S3Client(
+        bucket_name="test-bucket",
+        endpoint_url=f"http://127.0.0.1:{server.server_port}",
+        region_name="us-east-1",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+        use_ssl=False,
+        addressing_style="path",
+        download_read_timeout=0.3,
+    )
+    yield client, server.requests
+    server.stop.set()
+    server.shutdown()
+    server.server_close()
+
+
+class TestStalledDownload:
+    # Standard retry mode sleeps up to 1 s before a retry, so the time bounds
+    # allow one second of backoff per botocore retry on top of the timeouts.
+
+    def test_download_attempts_are_bounded(self, stalling_s3, tmp_path):
+        client, requests = stalling_s3
+        dst = tmp_path / "stalled.bin"
+        start = time.monotonic()
+        with pytest.raises(RetriesExceededError):
+            client.download_file("stalled/key.blob", str(dst))
+        elapsed = time.monotonic() - start
+
+        # No HEAD (response checksum validation is "when_required"); two
+        # s3transfer attempts, each with two botocore attempts.
+        assert requests == ["GET"] * 4
+        assert elapsed < 4 * 0.3 + 2 * 1 + 2
+        assert not dst.exists()
+        assert list(tmp_path.glob("*.blob.tmp")) == []
+
+    def test_head_object_attempts_are_bounded(self, stalling_s3):
+        client, requests = stalling_s3
+        start = time.monotonic()
+        with pytest.raises(ReadTimeoutError):
+            client.head_object("stalled/key.blob")
+        elapsed = time.monotonic() - start
+
+        assert requests == ["HEAD"] * 2
+        assert elapsed < 2 * 0.3 + 1 + 2
