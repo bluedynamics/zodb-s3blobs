@@ -1,6 +1,17 @@
 # Changelog
 
-## 1.1.1 (unreleased)
+## 1.2.0 (unreleased)
+
+- Give blob downloads and HEAD requests their own S3 client with short
+  timeouts and bounded retries: connect 5 s, read 10 s, two botocore attempts
+  (standard retry mode), and two s3transfer attempts instead of five.
+  Previously a stalled connection blocked the web request that needed the
+  blob for the 300 s upload read timeout before the retry succeeded, and the
+  nested retries allowed far longer. Uploads, deletes and listings keep their
+  60 s / 300 s timeouts (#14). All five values are configurable with the new
+  `s3-connect-timeout`, `s3-read-timeout`, `s3-download-connect-timeout`,
+  `s3-download-read-timeout` and `s3-download-max-attempts` keys and the
+  matching `S3Client` arguments. Fixes #25.
 
 - Lower ruff's C901 max-complexity threshold from 15 to 13 as part of the
   ecosystem-wide complexity ratchet. The code base passes as-is.

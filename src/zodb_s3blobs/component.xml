@@ -62,6 +62,42 @@
       </description>
     </key>
 
+    <key name="s3-connect-timeout" datatype="float" default="60">
+      <description>
+        Connect timeout in seconds for uploads, deletes and listings.
+      </description>
+    </key>
+
+    <key name="s3-read-timeout" datatype="float" default="300">
+      <description>
+        Socket read timeout in seconds for uploads, deletes and listings.
+        Kept long because some providers answer PUT requests under
+        concurrent load only after more than a minute.
+      </description>
+    </key>
+
+    <key name="s3-download-connect-timeout" datatype="float" default="5">
+      <description>
+        Connect timeout in seconds for blob downloads and HEAD requests.
+      </description>
+    </key>
+
+    <key name="s3-download-read-timeout" datatype="float" default="10">
+      <description>
+        Socket read timeout in seconds for blob downloads and HEAD requests.
+        This is an inactivity timeout per socket operation, not a limit on
+        the total download time. Downloads block the web request that needs
+        the blob, so a stalled connection must be abandoned quickly.
+      </description>
+    </key>
+
+    <key name="s3-download-max-attempts" datatype="integer" default="2">
+      <description>
+        Total attempts (first try plus retries) per download and HEAD
+        request, using botocore's standard retry mode.
+      </description>
+    </key>
+
     <key name="cache-dir" required="yes">
       <description>Local cache directory path.</description>
     </key>

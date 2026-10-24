@@ -100,3 +100,50 @@ class TestZConfig:
         assert isinstance(storage, S3BlobStorage)
         assert storage._s3_client._sse_extra_args["SSECustomerAlgorithm"] == "AES256"
         storage.close()
+
+    def test_timeouts(self, s3_env, tmp_path):
+        cache_dir = str(tmp_path / "cache")
+        storage = ZODB.config.storageFromString(
+            f"""\
+            %import zodb_s3blobs
+            <s3blobstorage>
+                bucket-name test-bucket
+                s3-region us-east-1
+                s3-connect-timeout 20
+                s3-read-timeout 120
+                s3-download-connect-timeout 3
+                s3-download-read-timeout 7.5
+                s3-download-max-attempts 3
+                cache-dir {cache_dir}
+                <mappingstorage>
+                </mappingstorage>
+            </s3blobstorage>
+            """
+        )
+        client = storage._s3_client
+        assert client._client.meta.config.connect_timeout == 20
+        assert client._client.meta.config.read_timeout == 120
+        download = client._download_client.meta.config
+        assert download.connect_timeout == 3
+        assert download.read_timeout == 7.5
+        assert download.retries["total_max_attempts"] == 3
+        storage.close()
+
+    def test_timeout_defaults(self, s3_env, tmp_path):
+        cache_dir = str(tmp_path / "cache")
+        storage = ZODB.config.storageFromString(
+            f"""\
+            %import zodb_s3blobs
+            <s3blobstorage>
+                bucket-name test-bucket
+                s3-region us-east-1
+                cache-dir {cache_dir}
+                <mappingstorage>
+                </mappingstorage>
+            </s3blobstorage>
+            """
+        )
+        client = storage._s3_client
+        assert client._client.meta.config.read_timeout == 300
+        assert client._download_client.meta.config.read_timeout == 10
+        storage.close()

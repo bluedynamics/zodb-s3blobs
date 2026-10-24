@@ -90,6 +90,11 @@ transaction commits.
 | `s3-use-ssl` | `true` | Whether to use SSL for S3 connections |
 | `s3-addressing-style` | `auto` | S3 addressing style: `path`, `virtual`, or `auto` |
 | `s3-sse-customer-key` | `None` | Base64-encoded 256-bit key for SSE-C encryption. Requires SSL. |
+| `s3-connect-timeout` | `60` | Connect timeout (seconds) for uploads, deletes and listings |
+| `s3-read-timeout` | `300` | Socket read timeout (seconds) for uploads, deletes and listings |
+| `s3-download-connect-timeout` | `5` | Connect timeout (seconds) for downloads and HEAD requests |
+| `s3-download-read-timeout` | `10` | Socket read timeout (seconds) for downloads and HEAD requests |
+| `s3-download-max-attempts` | `2` | Total attempts per download and HEAD request (botocore standard retry mode) |
 | `cache-dir` | *(required)* | Local cache directory path |
 | `cache-size` | `1GB` | Maximum local cache size |
 
@@ -115,6 +120,23 @@ With a configured prefix: `{prefix}/blobs/{oid_hex}/{tid_hex}.blob`
 ### Local Cache
 
 The local filesystem cache provides fast reads after the first access. It uses LRU eviction with a background daemon thread that removes the oldest files (by access time) when the total size exceeds the configured maximum. The cache is required -- S3 latency makes direct access impractical for ZODB's synchronous access patterns.
+
+### Timeouts and Retries
+
+Uploads and reads use separate S3 clients with separate settings.
+
+- **Uploads** (and deletes, listings) run during `tpc_vote` or `pack()`. They keep long timeouts because some providers (Hetzner Object Storage) answer PUT requests under concurrent load only after more than 60 seconds.
+- **Downloads** (and HEAD requests) run when a blob is not in the local cache, which usually means inside a web request. They use short timeouts so that a stalled connection is abandoned quickly and the retry runs on a fresh one.
+
+The read timeout is an inactivity timeout per socket operation, not a limit on the total download time: a download that keeps receiving data never hits it. Retries also nest. s3transfer restarts a failed GET once (two attempts), and botocore makes up to `s3-download-max-attempts` attempts inside each of those. When every attempt stalls, a download gives up after roughly
+
+```
+2 × s3-download-max-attempts × (s3-download-connect-timeout + s3-download-read-timeout)
+```
+
+plus a retry backoff of up to one second per botocore retry. Objects larger than 8 MB are fetched in 8 MB ranged GETs, and this bound applies to each of them. With the defaults a stalled connection costs about 10 seconds, and four stalls in a row about 40 seconds.
+
+Keep the worst case below any timeout that applies to the whole request. zodb-pgjsonb, for example, holds a PostgreSQL transaction open during the request and terminates it after `idle_in_transaction_session_timeout` (60 seconds by default). A cold-cache download that takes longer in total fails there, whatever the S3 timeouts are. A wall-clock deadline for downloads is tracked in [#26](https://github.com/bluedynamics/zodb-s3blobs/issues/26).
 
 ### Garbage Collection
 

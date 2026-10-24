@@ -22,6 +22,11 @@ class S3BlobStorageFactory(BaseConfig):
             use_ssl=config.s3_use_ssl,
             addressing_style=config.s3_addressing_style,
             sse_customer_key=config.s3_sse_customer_key,
+            connect_timeout=config.s3_connect_timeout,
+            read_timeout=config.s3_read_timeout,
+            download_connect_timeout=config.s3_download_connect_timeout,
+            download_read_timeout=config.s3_download_read_timeout,
+            download_max_attempts=config.s3_download_max_attempts,
         )
         cache = S3BlobCache(
             cache_dir=config.cache_dir,

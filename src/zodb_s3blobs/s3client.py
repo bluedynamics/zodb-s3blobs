@@ -36,6 +36,9 @@ class S3Client:
         addressing_style="auto",
         connect_timeout=60,
         read_timeout=300,
+        download_connect_timeout=5,
+        download_read_timeout=10,
+        download_max_attempts=2,
         sse_customer_key=None,
         s3_max_concurrency=1,
         multipart_threshold=5 * 1024 * 1024 * 1024,
@@ -46,6 +49,10 @@ class S3Client:
             multipart_threshold=multipart_threshold,
             max_concurrency=s3_max_concurrency,
         )
+        # Downloads run in the web request path. s3transfer wraps each GET
+        # (including its botocore retries) in its own retry loop, so keep it
+        # to one restart; the default of 5 multiplies the worst case.
+        self._download_transfer_config = TransferConfig(num_download_attempts=2)
 
         if self._prefix:
             if not re.fullmatch(r"[a-zA-Z0-9._/-]*", self._prefix):
@@ -73,16 +80,31 @@ class S3Client:
         else:
             self._sse_extra_args = {}
 
-        config = Config(
+        base_config = Config(
             request_checksum_calculation="when_required",
             response_checksum_validation="when_required",
             s3={"addressing_style": addressing_style},
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
             max_pool_connections=50,
         )
+        # Uploads keep long timeouts: Hetzner answers PUTs under concurrent
+        # load after more than 60 s (#14).
+        config = base_config.merge(
+            Config(connect_timeout=connect_timeout, read_timeout=read_timeout)
+        )
+        # Reads (download, head) block a web request and must give up on a
+        # stalled connection quickly so the retry can use a fresh one (#25).
+        download_config = base_config.merge(
+            Config(
+                connect_timeout=download_connect_timeout,
+                read_timeout=download_read_timeout,
+                retries={
+                    "mode": "standard",
+                    "total_max_attempts": download_max_attempts,
+                },
+            )
+        )
 
-        kwargs: dict[str, object] = {"config": config}
+        kwargs: dict[str, object] = {}
         if endpoint_url:
             kwargs["endpoint_url"] = endpoint_url
         if region_name:
@@ -97,7 +119,8 @@ class S3Client:
                 "S3 SSL is disabled — data and credentials are transmitted in cleartext"
             )
 
-        self._client = boto3.client("s3", **kwargs)
+        self._client = boto3.client("s3", config=config, **kwargs)
+        self._download_client = boto3.client("s3", config=download_config, **kwargs)
 
     def _full_key(self, s3_key):
         if self._prefix:
@@ -133,11 +156,12 @@ class S3Client:
         try:
             os.close(fd)
             try:
-                self._client.download_file(
+                self._download_client.download_file(
                     self.bucket_name,
                     full_key,
                     tmp_path,
                     ExtraArgs=self._sse_extra_args or None,
+                    Config=self._download_transfer_config,
                 )
             except ClientError as e:
                 self._wrap_client_error(e, "download", s3_key)
@@ -157,7 +181,7 @@ class S3Client:
     def head_object(self, s3_key):
         full_key = self._full_key(s3_key)
         try:
-            return self._client.head_object(
+            return self._download_client.head_object(
                 Bucket=self.bucket_name, Key=full_key, **self._sse_extra_args
             )
         except ClientError as e:
