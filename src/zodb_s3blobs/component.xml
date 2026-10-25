@@ -25,7 +25,7 @@
       <description>
         AWS access key ID. Uses boto3 credential chain if omitted.
         Prefer environment variable substitution over plaintext values,
-        e.g. ``s3-access-key $S3_ACCESS_KEY``.
+        e.g. ``s3-access-key $(S3_ACCESS_KEY)``.
         For production, consider omitting this key entirely and using
         IAM roles or the standard boto3 credential chain instead.
       </description>
@@ -35,7 +35,7 @@
       <description>
         AWS secret access key. Uses boto3 credential chain if omitted.
         Prefer environment variable substitution over plaintext values,
-        e.g. ``s3-secret-key $S3_SECRET_KEY``.
+        e.g. ``s3-secret-key $(S3_SECRET_KEY)``.
         For production, consider omitting this key entirely and using
         IAM roles or the standard boto3 credential chain instead.
       </description>
@@ -53,7 +53,7 @@
       <description>
         Base64-encoded 256-bit (32-byte) key for SSE-C encryption.
         When set, all S3 uploads are encrypted and reads require this key.
-        Use env var substitution: ``s3-sse-customer-key $S3_SSE_KEY``
+        Use env var substitution: ``s3-sse-customer-key $(S3_SSE_KEY)``
         Requires SSL (s3-use-ssl must be true).
 
         NOTE: AWS will disable SSE-C by default on new buckets from April 2026.

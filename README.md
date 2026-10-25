@@ -9,8 +9,8 @@ Store ZODB blobs in S3-compatible object storage.
 - Local LRU filesystem cache for fast reads
 - Full ZODB two-phase commit integration (transactional safety)
 - ZConfig integration for `zope.conf` configuration
-- Supports MVCC storages (`new_instance()`)
-- Garbage collection of orphaned S3 objects during `pack()`
+- Provides `IMVCCStorage` when the base storage does (RelStorage), so every connection gets its own instance
+- Garbage collection during `pack()`: blobs of unreachable objects and of superseded revisions
 
 ## Installation
 
@@ -31,8 +31,8 @@ Add `%import zodb_s3blobs` and use the `<s3blobstorage>` section wrapping any ba
     <s3blobstorage>
         bucket-name my-zodb-blobs
         s3-endpoint-url http://minio:9000
-        s3-access-key $S3_ACCESS_KEY
-        s3-secret-key $S3_SECRET_KEY
+        s3-access-key $(S3_ACCESS_KEY)
+        s3-secret-key $(S3_SECRET_KEY)
         cache-dir /var/cache/zodb-s3-blobs
         cache-size 2GB
         <filestorage>
@@ -42,7 +42,9 @@ Add `%import zodb_s3blobs` and use the `<s3blobstorage>` section wrapping any ba
 </zodb_db>
 ```
 
-ZConfig expands `$VARIABLE` and `${VARIABLE}` from the process environment.
+ZConfig expands `$(VARIABLE)` from the process environment.
+Plain `$VARIABLE` and `${VARIABLE}` only expand names defined with `%define`;
+an undefined name fails at startup with `SubstitutionReplacementError`.
 For production, consider omitting `s3-access-key` and `s3-secret-key` entirely
 and relying on the boto3 credential chain (IAM roles, instance profiles,
 `~/.aws/credentials`, or the `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
@@ -77,6 +79,11 @@ upload — to ensure transactional consistency. This is the same behavior as
 RelStorage 2.x and is required so that blob uploads complete before the
 transaction commits.
 
+`S3BlobStorage` provides `IMVCCStorage` when RelStorage does. ZODB then gives
+every connection its own `S3BlobStorage` instance on top of its own RelStorage
+instance and polls it for invalidations, so each process sees the commits of the
+others.
+
 ## Configuration Reference
 
 | Parameter | Default | Description |
@@ -85,8 +92,8 @@ transaction commits.
 | `s3-prefix` | `""` | Key prefix in bucket |
 | `s3-endpoint-url` | `None` | For MinIO, Ceph, etc. |
 | `s3-region` | `None` | AWS region |
-| `s3-access-key` | `None` | Uses boto3 credential chain if omitted. Use `$ENV_VAR` substitution — never hardcode credentials. |
-| `s3-secret-key` | `None` | Uses boto3 credential chain if omitted. Use `$ENV_VAR` substitution — never hardcode credentials. |
+| `s3-access-key` | `None` | Uses boto3 credential chain if omitted. Use `$(ENV_VAR)` substitution — never hardcode credentials. |
+| `s3-secret-key` | `None` | Uses boto3 credential chain if omitted. Use `$(ENV_VAR)` substitution — never hardcode credentials. |
 | `s3-use-ssl` | `true` | Whether to use SSL for S3 connections |
 | `s3-addressing-style` | `auto` | S3 addressing style: `path`, `virtual`, or `auto` |
 | `s3-sse-customer-key` | `None` | Base64-encoded 256-bit key for SSE-C encryption. Requires SSL. |
@@ -142,6 +149,8 @@ Keep the worst case below any timeout that applies to the whole request. zodb-pg
 
 During `pack()`, the base storage is packed first. Then every S3 key whose revision (`oid`, `tid`) the base storage no longer has is deleted: blobs of unreachable objects, of revisions superseded before the pack time, and of aborted transactions whose cleanup failed. History-preserving storages keep the revision current at the pack time and any later ones, so those blobs stay too. Keys newer than the last committed transaction are left alone, as they may belong to a transaction that is still committing.
 
+Versions before 1.2.0 never deleted the blobs of superseded revisions, so the first `pack()` after upgrading can delete a large number of S3 objects at once. Enable bucket versioning or take a backup before that first pack if you want a way back.
+
 ### S3 Bucket Security
 
 Ensure your S3 bucket has appropriate access controls (Block Public Access enabled, restrictive bucket policy). The minimum IAM policy required by `zodb-s3blobs`:
@@ -186,7 +195,7 @@ python -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"
 Configure via environment variable:
 
 ```xml
-s3-sse-customer-key $S3_SSE_KEY
+s3-sse-customer-key $(S3_SSE_KEY)
 ```
 
 **Important:** If you lose the key, encrypted data is irrecoverable. SSL is required (enforced at startup).
