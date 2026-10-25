@@ -2,6 +2,14 @@
 
 ## 1.2.1 (unreleased)
 
+- Log why blob downloads fail. Every failed attempt on the download client
+  is logged at INFO with operation, key and cause (exception, or HTTP status
+  and S3 error code), including attempts that a later retry recovers. When
+  all attempts fail, a WARNING names key, elapsed time and the last cause, and
+  the re-raised `RetriesExceededError` carries the same message instead of a
+  bare "Max Retries Exceeded"; the type is unchanged and the cause is chained.
+  Fixes #32.
+
 - Declare and test Python 3.15 support: trove classifier and CI test matrix.
   The test suite passes on 3.15.0 without code changes.
 

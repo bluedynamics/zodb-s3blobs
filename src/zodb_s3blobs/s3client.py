@@ -1,3 +1,4 @@
+from boto3.exceptions import RetriesExceededError
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import ClientError
@@ -11,6 +12,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,33 @@ logger = logging.getLogger(__name__)
 
 class S3OperationError(Exception):
     """Wraps boto3 ClientError to avoid leaking AWS infrastructure details."""
+
+
+def _log_failed_attempt(
+    attempts, operation, request_dict, response=None, caught_exception=None, **kw
+):
+    """Log one line per failed attempt on the download client.
+
+    Registered on ``needs-retry.s3``, which botocore emits after every
+    attempt.  Returns None, so it never influences the retry decision.
+    Without it the cause of a retried attempt is lost: s3transfer logs its
+    own retries only at DEBUG, and botocore not at all.
+    """
+    if caught_exception is not None:
+        cause = f"{type(caught_exception).__name__}: {caught_exception}"
+    elif response is not None and response[0].status_code >= 500:
+        error = response[1].get("Error", {}) if response[1] else {}
+        cause = f"HTTP {response[0].status_code} {error.get('Code', '')}".rstrip()
+    else:
+        return None
+    logger.info(
+        "S3 %s attempt %d failed for %s: %s",
+        operation.name,
+        attempts,
+        request_dict.get("url_path", "?"),
+        cause,
+    )
+    return None
 
 
 @implementer(IS3Client)
@@ -121,6 +150,9 @@ class S3Client:
 
         self._client = boto3.client("s3", config=config, **kwargs)
         self._download_client = boto3.client("s3", config=download_config, **kwargs)
+        self._download_client.meta.events.register(
+            "needs-retry.s3", _log_failed_attempt
+        )
 
     def _full_key(self, s3_key):
         if self._prefix:
@@ -155,6 +187,7 @@ class S3Client:
         fd, tmp_path = tempfile.mkstemp(dir=target_dir, suffix=".blob.tmp")
         try:
             os.close(fd)
+            start = time.monotonic()
             try:
                 self._download_client.download_file(
                     self.bucket_name,
@@ -165,6 +198,17 @@ class S3Client:
                 )
             except ClientError as e:
                 self._wrap_client_error(e, "download", s3_key)
+            except RetriesExceededError as e:
+                # boto3 keeps the cause only on the exception object; its
+                # message is a bare "Max Retries Exceeded".
+                cause = e.last_exception
+                message = (
+                    f"S3 download failed for key={s3_key} after "
+                    f"{time.monotonic() - start:.1f} s: "
+                    f"{type(cause).__name__}: {cause}"
+                )
+                logger.warning(message)
+                raise RetriesExceededError(cause, msg=message) from cause
             os.rename(tmp_path, local_path)
         except BaseException:
             with contextlib.suppress(OSError):
