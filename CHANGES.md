@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.1 (unreleased)
+## 1.2.1
 
 - Log why blob downloads fail. Every failed attempt on the download client
   is logged at INFO with operation, key and cause (exception, or HTTP status
