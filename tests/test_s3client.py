@@ -7,6 +7,7 @@ from zodb_s3blobs.s3client import S3Client
 import base64
 import boto3
 import http.server
+import logging
 import os
 import pytest
 import stat
@@ -407,3 +408,111 @@ class TestStalledDownload:
 
         assert requests == ["HEAD"] * 2
         assert elapsed < 2 * 0.3 + 1 + 2
+
+
+class _FlakyHandler(http.server.BaseHTTPRequestHandler):
+    """Answers the first GET with a 504, every later one with the blob."""
+
+    protocol_version = "HTTP/1.1"
+    body = b"blob data"
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        self.server.requests.append(self.command)
+        if len(self.server.requests) == 1:
+            error = b"<Error><Code>GatewayTimeout</Code></Error>"
+            self.send_response(504)
+            self.send_header("Content-Type", "application/xml")
+            self.send_header("Content-Length", str(len(error)))
+            self.end_headers()
+            self.wfile.write(error)
+            return
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(self.body)))
+        self.send_header("ETag", '"etag"')
+        self.end_headers()
+        self.wfile.write(self.body)
+
+
+@pytest.fixture
+def flaky_s3():
+    """S3 client against a local endpoint that fails the first GET with 504."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _FlakyHandler)
+    server.daemon_threads = True
+    server.requests = []
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    client = S3Client(
+        bucket_name="test-bucket",
+        endpoint_url=f"http://127.0.0.1:{server.server_port}",
+        region_name="us-east-1",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+        use_ssl=False,
+        addressing_style="path",
+    )
+    yield client, server.requests
+    server.shutdown()
+    server.server_close()
+
+
+def _records(caplog, level):
+    return [
+        r
+        for r in caplog.records
+        if r.name == "zodb_s3blobs.s3client" and r.levelno == level
+    ]
+
+
+class TestDownloadFailureLogging:
+    def test_each_failed_attempt_is_logged(self, stalling_s3, tmp_path, caplog):
+        client, requests = stalling_s3
+        caplog.set_level(logging.INFO, logger="zodb_s3blobs.s3client")
+        with pytest.raises(RetriesExceededError):
+            client.download_file("stalled/key.blob", str(tmp_path / "x"))
+
+        attempts = _records(caplog, logging.INFO)
+        assert len(attempts) == len(requests) == 4
+        for record in attempts:
+            message = record.getMessage()
+            assert "GetObject" in message
+            assert "stalled/key.blob" in message
+            assert "ReadTimeoutError" in message
+
+    def test_final_error_names_the_cause(self, stalling_s3, tmp_path, caplog):
+        client, _requests = stalling_s3
+        caplog.set_level(logging.INFO, logger="zodb_s3blobs.s3client")
+        with pytest.raises(RetriesExceededError) as excinfo:
+            client.download_file("stalled/key.blob", str(tmp_path / "x"))
+
+        assert isinstance(excinfo.value.last_exception, ReadTimeoutError)
+        assert excinfo.value.__cause__ is excinfo.value.last_exception
+        assert "stalled/key.blob" in str(excinfo.value)
+        assert "ReadTimeoutError" in str(excinfo.value)
+        (warning,) = _records(caplog, logging.WARNING)
+        assert "stalled/key.blob" in warning.getMessage()
+        assert "ReadTimeoutError" in warning.getMessage()
+
+    def test_retried_server_error_is_logged(self, flaky_s3, tmp_path, caplog):
+        client, requests = flaky_s3
+        caplog.set_level(logging.INFO, logger="zodb_s3blobs.s3client")
+        dst = tmp_path / "blob"
+        client.download_file("flaky/key.blob", str(dst))
+
+        assert dst.read_bytes() == b"blob data"
+        assert requests == ["GET", "GET"]
+        (attempt,) = _records(caplog, logging.INFO)
+        assert "504" in attempt.getMessage()
+        assert "GatewayTimeout" in attempt.getMessage()
+        assert _records(caplog, logging.WARNING) == []
+
+    def test_successful_download_logs_nothing(self, client, tmp_path, caplog):
+        src = tmp_path / "src.bin"
+        src.write_bytes(b"data")
+        client.upload_file(str(src), "ok/key.blob")
+        caplog.set_level(logging.INFO, logger="zodb_s3blobs.s3client")
+        client.download_file("ok/key.blob", str(tmp_path / "dst.bin"))
+
+        assert _records(caplog, logging.INFO) == []
+        assert _records(caplog, logging.WARNING) == []
